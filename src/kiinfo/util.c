@@ -385,7 +385,7 @@ get_pathname(void *arg1, void *arg2)
 	uint64	dev;
 	ssize_t sz;
 	char    *pos;
-	int 	path1, path2, path3, path4;
+	int 	path1=0, path2=0, path3=0, path4=0, npaths=0;
 
 	if (!is_alive)  return 0;
 	
@@ -399,8 +399,12 @@ get_pathname(void *arg1, void *arg2)
 	pos = strrchr(linkstr, '/');
 	pos++;
 	
-	sscanf (pos, "%d:%d:%d:%d", &path1, &path2, &path3, &path4);
-	devinfop->devpath = FCPATH(path1, path2, path3, path4);
+	npaths = sscanf (pos, "%d:%d:%d:%d", &path1, &path2, &path3, &path4);
+	if (npaths < 2) {
+		devinfop->devpath = -1;
+	} else {
+		devinfop->devpath = FCPATH(path1, path2, path3, path4);
+	}
 }
 		
 	
@@ -1771,8 +1775,6 @@ print_stacktrace(unsigned long *stktrc, unsigned long depth, int start, uint64 p
 }
 
 
-int stack_switch_start = 0;
-
 int 
 find_switch_start(uint64 *stack, uint64 depth)
 {
@@ -1812,6 +1814,44 @@ find_switch_start(uint64 *stack, uint64 depth)
 			else if (strncmp(symptr, "sched_switch_trace", 18) == 0) retval= i+1;
 			else if (strncmp(symptr, "pick_next_task_fair", 19) == 0) retval= i+1;
 			else if (strncmp(symptr, "__sched_text_start", 18) == 0) retval= i+1;		/* ARM64, l4tm */
+			else continue;
+		}
+        }
+        return retval;
+}
+
+int 
+find_hc_start(uint64 *stack, uint64 depth)
+{
+	int i;
+	char *symptr;
+	int retval=1;
+
+
+	if (globals->nsyms==0) return 0;
+	if (depth == 0) return 0;
+	if (stack[0] != STACK_CONTEXT_KERNEL) {
+		/* we should find the KERNEL CONTEXT marker for a switch record */
+		return 0;
+	}
+	
+	for (i=1; i < depth; i++) { 
+		if (STACK_CONTEXT(stack[i])) {
+			/* stop at next CONTEXT marker, if we get this far
+			 * then we did not find a switch overhead func 
+			 */
+			break;
+		}
+	
+		symptr = findsym(stack[i]);
+		
+		if (symptr)  {
+			if (strncmp(symptr, "apic_timer_interrupt", 20) == 0)  retval=i+1;
+			else if (strncmp(symptr, "ret_from_intr", 18) == 0) retval= i+1;
+			else if (strncmp(symptr, "__irqentry_text_start", 21) == 0) retval= i+1;
+			else if (strncmp(symptr, "el1h_64_irq", 11) == 0) retval= i+1;  /* ARM64 */
+			else if (strncmp(symptr, "el1_irq", 7) == 0) retval= i+1;       /* ARM64 */
+			else if (strncmp(symptr, "arch_local_", 11) == 0) retval= i+1;  /* ARM64 */
 			else continue;
 		}
         }
@@ -1870,22 +1910,49 @@ is_idle_pc(uint64 pc)
 /*
  * convert_pc_to_key()
  */
-uint64 convert_pc_to_key(uint64 pc)
+uint64 convert_pc_to_key(uint64 mode, void *arg2, uint64 pc)
 {
+	pid_info_t *pidp = (pid_info_t *)arg2;
         uint64 key=0, offset=0;
+	vtxt_preg_t *pregp = NULL;
 	int idx;
 
 	/* do not convert the CONTEXT markers */	
 	if (STACK_CONTEXT(pc)) return pc;
 
-	if (globals->symtable == NULL) return UNKNOWN_SYMIDX;
-	idx = findsym_idx(pc);	
-        offset = pc - globals->symtable[idx].addr;
-        if ((idx > 0) && (idx < globals->nsyms-1) && (offset < 0x10000)) {
-                return idx;
-        } else {	
-		return pc;
-        }
+	if (mode == STACK_CONTEXT_KERNEL) {
+		key = UNKNOWN_KERNEL_SYMIDX;
+		if (globals->symtable == NULL) return UNKNOWN_KERNEL_SYMIDX;
+		idx = findsym_idx(pc);	
+        	offset = pc - globals->symtable[idx].addr;
+        	if ((idx > 0) && (idx < globals->nsyms-1) && (offset < 0x10000)) {
+			key = idx;
+        	} else {	
+			key = pc;
+        	}
+	} else {
+		key = UNKNOWN_USER_SYMIDX;
+                if (objfile_preg.elfp && (pc < 0x10000000)) {
+                        if (symlookup(&objfile_preg, pc, &offset)) {
+                                key = pc - offset;
+                        }
+                } else if (pidp) {
+                        /* if multi-threaded, use TGID */
+                        if (pidp->PID != pidp->tgid) pidp = GET_PIDP(&globals->pid_hash, pidp->tgid);
+
+                        if (pregp = find_vtext_preg(pidp->vtxt_pregp, pc)) {
+                                if (symlookup(pregp, pc, &offset)) {
+                                        key = pc - offset;
+                                } else if (maplookup(pidp->mapinfop, pc, &offset)) {
+                                        key = pc - offset;
+                                }
+                        } else if (maplookup(pidp->mapinfop, pc, &offset)) {
+                                key = pc - offset;
+                        }
+                }
+	}
+
+	return key;
 }
 
 

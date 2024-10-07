@@ -36,8 +36,9 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 		curtime.tv_sec = (wintime - UNIX_TIME_START) / TICKS_PER_SECOND;					\
 		curtime.tv_nsec = ((wintime - UNIX_TIME_START) % TICKS_PER_SECOND) * 100;				\
 		ctime_r(&curtime.tv_sec, timebuf);									\
-		timebuf[19] = 0;											\
-		printf ("%s.%09lld", timebuf, curtime.tv_nsec);								\
+		timebuf[19] = 0; 											\
+		timebuf[24] = 0;											\
+		printf ("%s.%09lld %s", timebuf, curtime.tv_nsec, &timebuf[20]);					\
 }
 
 #define PRINT_WIN_FILENAME(str)	{											\
@@ -102,44 +103,67 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 	}
 	
 #define PRINT_TIME(hrtime) { \
-	if (IS_WINKI) {															\
-		if (abstime_flag) {													\
-			printf ("%12.09f", (hrtime*1.0)/winki_hdr->PerfFreq);								\
-		} else if (fmttime_flag || epoch_flag) {										\
-			/* TBD Just use abstime for now */										\
-			printf ("%12.09f", (hrtime*1.0)/winki_hdr->PerfFreq);								\
-		} else {														\
-			printf ("%12.06f", ((hrtime - winki_start_time)*1.0)/winki_hdr->PerfFreq);						\
-		} 															\
-	} else {															\
-		if (abstime_flag) {													\
-			printf ("%12.09f", hrtime / 1000000000.0);									\
-		} else if ((fmttime_flag || epoch_flag) && (IS_LIKI_V3_PLUS || is_alive)) {						\
-			struct timespec curtime, delta_ts;										\
-			uint64 delta, dnsecs, dsecs;											\
-			char timebuf[30];												\
-																	\
-			delta = hrtime - start_time;											\
-			dnsecs = delta % 1000000000;											\
-			dsecs = delta / 1000000000;											\
-			if ((begin_time.tv_nsec + dnsecs) > 1000000000) {								\
-				curtime.tv_sec = begin_time.tv_sec + dsecs + 1;								\
-				curtime.tv_nsec = begin_time.tv_nsec + dnsecs - 1000000000;						\
-			} else {													\
-				curtime.tv_nsec = (begin_time.tv_nsec + dnsecs);							\
-				curtime.tv_sec = begin_time.tv_sec + dsecs;								\
-			}														\
-			if (fmttime_flag) {												\
-				ctime_r(&curtime.tv_sec, timebuf);									\
-				timebuf[19] = 0;											\
-				printf ("%s.%06lld", timebuf, curtime.tv_nsec / 1000);							\
-			} else {													\
-				printf ("%lld.%09lld", curtime.tv_sec, curtime.tv_nsec / 1000);						\
-			}														\
-		} else {														\
-			printf ("%12.06f", (hrtime - start_time) / 1000000000.0);							\
-		}															\
-	}																\
+	if (IS_WINKI) {														\
+		if (abstime_flag) {												\
+			printf ("%12.06f", (hrtime*1.0)/winki_hdr->PerfFreq);							\
+		} else if (fmttime_flag || epoch_flag) {									\
+			struct timespec begin_time, curtime;									\
+			float delta;												\
+			uint64 dnsecs, dsecs;											\
+			char timebuf[30];											\
+																\
+			begin_time.tv_sec = (globals->WinStartTime - UNIX_TIME_START) / TICKS_PER_SECOND;			\
+			begin_time.tv_nsec = ((globals->WinStartTime - UNIX_TIME_START) % TICKS_PER_SECOND) * 100;		\
+																\
+			delta = ((hrtime - winki_start_time)*1000000000.0)/winki_hdr->PerfFreq;					\
+			dnsecs = (uint64)delta % 1000000000;									\
+			dsecs = (uint64)delta / 1000000000;									\
+			if ((begin_time.tv_nsec + dnsecs) > 1000000000) {							\
+				curtime.tv_sec = begin_time.tv_sec + dsecs + 1;							\
+				curtime.tv_nsec = begin_time.tv_nsec + dnsecs - 1000000000;					\
+			} else {												\
+				curtime.tv_nsec = (begin_time.tv_nsec + dnsecs);						\
+				curtime.tv_sec = begin_time.tv_sec + dsecs;							\
+			}													\
+			if (fmttime_flag) {											\
+				ctime_r(&curtime.tv_sec, timebuf);								\
+				timebuf[19] = 0;										\
+				printf ("%s.%06lld", timebuf, curtime.tv_nsec / 1000);						\
+			} else {												\
+				printf ("%lld.%06lld", curtime.tv_sec, curtime.tv_nsec / 1000);					\
+			}													\
+		} else {													\
+			printf ("%12.06f", ((hrtime - winki_start_time)*1.0)/winki_hdr->PerfFreq);				\
+		} 														\
+	} else {														\
+		if (abstime_flag) {												\
+			printf ("%12.09f", hrtime / 1000000000.0);								\
+		} else if ((fmttime_flag || epoch_flag) && (IS_LIKI_V3_PLUS || is_alive)) {					\
+			struct timespec curtime, delta_ts;									\
+			uint64 delta, dnsecs, dsecs;										\
+			char timebuf[30];											\
+																\
+			delta = hrtime - start_time;										\
+			dnsecs = delta % 1000000000;										\
+			dsecs = delta / 1000000000;										\
+			if ((begin_time.tv_nsec + dnsecs) > 1000000000) {							\
+				curtime.tv_sec = begin_time.tv_sec + dsecs + 1;							\
+				curtime.tv_nsec = begin_time.tv_nsec + dnsecs - 1000000000;					\
+			} else {												\
+				curtime.tv_nsec = (begin_time.tv_nsec + dnsecs);						\
+				curtime.tv_sec = begin_time.tv_sec + dsecs;							\
+			}													\
+			if (fmttime_flag) {											\
+				ctime_r(&curtime.tv_sec, timebuf);								\
+				timebuf[19] = 0;										\
+				printf ("%s.%06lld", timebuf, curtime.tv_nsec / 1000);						\
+			} else {												\
+				printf ("%lld.%09lld", curtime.tv_sec, curtime.tv_nsec / 1000);					\
+			}													\
+		} else {													\
+			printf ("%12.06f", (hrtime - start_time) / 1000000000.0);						\
+		}														\
+	}															\
 }
 
 #define PRINT_COMMON_FIELDS(rec_ptr)  {													\
@@ -149,31 +173,32 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 		printf ("%cpid=%d%ctgid=%d", fsep, rec_ptr->pid, fsep, rec_ptr->tgid);							\
 }
 
-#define PRINT_COMMON_FIELDS_C002(p) {													\
-        PRINT_TIME(p->TimeStamp);													\
-        printf ("%ccpu=%d", fsep, trcinfop->cpu);											\
-        printf ("%ctid=%d%cpid=%d", fsep, p->tid, fsep, p->pid);       /* Windows uses PID/TID rather than TGID/TID */			\
-	/* printf ("%cver=%d", fsep, p->TraceVersion);			 */								\
-        /* printf ("%cid=0x%x", fsep, p->EventType);			 */								\
-        PRINT_EVENT(p->EventType);													\
+#define PRINT_COMMON_FIELDS_C002(p) {											\
+        PRINT_TIME(p->TimeStamp);											\
+        printf ("%ccpu=%d", fsep, trcinfop->cpu);									\
+        printf ("%ctid=%d%cpid=%d", fsep, p->tid, fsep, p->pid);       /* Windows uses PID/TID rather than TGID/TID */	\
+	if (p->ReservedHeaderField != 0xc002)  printf ("%cINVALID_ HDR=%d", fsep, p->ReservedHeaderField);			\
+	/* printf ("%cver=%d", fsep, p->TraceVersion); */								\
+        /* printf ("%cid=0x%x", fsep, p->EventType);			 */						\
+        PRINT_EVENT(p->EventType);											\
 }
 
-#define PRINT_COMMON_FIELDS_C011(p, tid, pid) {												\
-        PRINT_TIME(p->TimeStamp);													\
-        printf ("%ccpu=%d", fsep, trcinfop->cpu);											\
-        printf ("%ctid=%d%cpid=%d", fsep, tid, fsep, pid);       /* Windows uses PID/TID rather than TGID/TID */			\
-	/* printf ("%cver=%d", fsep, p->TraceVersion); */										\
-        /* printf ("%cid=0x%x", fsep, p->EventType); */											\
-        PRINT_EVENT(p->EventType);													\
+#define PRINT_COMMON_FIELDS_C011(p, tid, pid) {										\
+        PRINT_TIME(p->TimeStamp);											\
+        printf ("%ccpu=%d", fsep, trcinfop->cpu);									\
+        printf ("%ctid=%d%cpid=%d", fsep, tid, fsep, pid);       /* Windows uses PID/TID rather than TGID/TID */	\
+	if (p->ReservedHeaderField != 0xc011)  printf ("%cINVALID_HDR=%d", fsep, p->ReservedHeaderField);	\
+	/* printf ("%cver=%d", fsep, p->TraceVersion); */								\
+        /* printf ("%cid=0x%x", fsep, p->EventType); */									\
+        PRINT_EVENT(p->EventType);											\
 }
 
-#define PRINT_COMMON_FIELDS_C014(p) {													\
-        PRINT_TIME(p->TimeStamp);													\
-        printf ("%ccpu=%d", fsep, trcinfop->cpu);											\
-        printf ("%ctid=%d%cpid=%d", fsep, 0, fsep, 0);       /* Windows uses PID/TID rather than TGID/TID */				\
-	printf ("%cProvider", fsep, p->EventType);												\
-	printf ("%cid=%d", fsep, p->EventType);												\
-	printf ("%cver=%d", fsep, p->TraceVersion);			 								\
+#define PRINT_COMMON_FIELDS_C014(p) {											\
+        PRINT_TIME(p->TimeStamp);											\
+        printf ("%ccpu=%d", fsep, trcinfop->cpu);									\
+        printf ("%ctid=%d%cpid=%d", fsep, 0, fsep, 0);       /* Windows uses PID/TID rather than TGID/TID */		\
+	if (p->ReservedHeaderField != 0xc014)  printf ("%cINVALID_HDR=0x%x", fsep, p->ReservedHeaderField);	\
+	/* printf ("%cver=%d", fsep, p->TraceVersion);	*/								\
 }
 
 #define PRINT_KD_REC(rec_ptr)												\
@@ -271,6 +296,11 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define TRACE_MM_PAGE_FREE		trace_ids.trace_mm_page_free
 #define TRACE_MM_PAGE_FREE_DIRECT	trace_ids.trace_mm_page_free_direct
 
+#define TRACE_CALL_FUNCTION_ENTRY	trace_ids.trace_call_function_entry
+#define TRACE_CALL_FUNCTION_EXIT	trace_ids.trace_call_function_exit
+#define TRACE_CALL_FUNCTION_SINGLE_ENTRY	trace_ids.trace_call_function_single_entry
+#define TRACE_CALL_FUNCTION_SINGLE_EXIT	trace_ids.trace_call_function_single_exit
+
 typedef struct kd_print {
 	kd_rec_t kdrec;
 	uint32	filler;
@@ -319,6 +349,8 @@ extern kdtype_attr_t kernel_pagefault_attr[];
 extern kdtype_attr_t filemap_pagecache_attr[];
 extern kdtype_attr_t mm_page_alloc_attr[];
 extern kdtype_attr_t mm_page_free_attr[];
+extern kdtype_attr_t call_function_entry_attr[];
+extern kdtype_attr_t call_function_exit_attr[];
 extern kdtype_attr_t listen_overflow[];
 extern kdtype_attr_t walltime[];
 extern kdtype_attr_t marker_attr[];

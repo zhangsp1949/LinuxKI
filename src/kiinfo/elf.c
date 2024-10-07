@@ -83,7 +83,7 @@ map_elf(char *fname)
 	struct stat statbuf;
 	uint64 size;
 	int ret;
-	char do_printf=1;
+	char do_printf=0;
 
 	if (objdump_flag) do_printf=0;
 
@@ -395,7 +395,7 @@ char *symlookup(void *arg1, Elf64_Addr symaddr, uint64 *offsetp)
 	 * we have the default virtual address defined in the object file.  These MAY not be the same.   So we will get
 	 * the offset from the start of the ELF in memory and use that to map the symaddr into the ELF file.    
 	 */
-	symaddr = symaddr - (pregp->p_vaddr - pregp->elf_vaddr);
+	symaddr = (symaddr - pregp->p_vaddr) + MAX(pregp->elf_vaddr, pregp->p_off);
 
 	/* printf ("symlookup():  addr: 0x%llx   pregp: vaddr 0x%llx p_off 0x%llx elf_vaddr 0x%llx\n", symaddr, pregp->p_vaddr, pregp->p_off, pregp->elf_vaddr); */
 	/* build the sorted symbol table, if it is not already built */
@@ -497,7 +497,7 @@ int load_elf(char *fnamep, vtxt_preg_t *pregp)
 	/* for symlookup, the p_vaddr should be filled in.  But for the obfjile, it is not so let's fill it in */
 	if (pregp->p_vaddr == 0ull) pregp->p_vaddr = pregp->elf_vaddr;
 	
-	return 0;
+	return 1;
 }
 
 void *find_vtext_preg(void *arg1, uint64 pc)

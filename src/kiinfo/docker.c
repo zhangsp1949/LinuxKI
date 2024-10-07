@@ -62,7 +62,7 @@ docker_init_func(void *v)
 	if (debug) printf ("docker_init_func()\n");
 
 	if (IS_WINKI) {
-		fprintf (stderr, "Docker Activity Report is not availble for Windows traces\n");
+		fprintf (stderr, "Container Activity Report is not availble for Windows traces\n");
 		return;
 	}	
 
@@ -70,7 +70,6 @@ docker_init_func(void *v)
         report_func = docker_report_func;
 
         bufmiss_func = pid_bufmiss_func;
-        /* bufswtch_func = pid_bufswtch_func; */
         alarm_func = pid_alarm_func;
 	filter_func = trace_filter_func;
 	report_func_arg  = filter_func_arg;
@@ -158,6 +157,7 @@ docker_init_func(void *v)
 	parse_devices();
         parse_ll_R();
 	parse_docker_ps();
+	parse_pods();
 
 	if (objfile) {
 		load_elf(objfile, &objfile_preg);
@@ -170,9 +170,9 @@ docker_init_func(void *v)
 	if (is_alive) return;
 	parse_mpsched();
 	parse_proc_cgroup();
+	parse_lsof();
 	parse_pself();
 	parse_edus();
-	parse_lsof();
 	parse_maps();
         parse_mpath();
 	parse_jstack();
@@ -387,7 +387,7 @@ print_docker_detail(void *arg1, void *arg2)
         if (docktree) {
                 sprintf (dock_fname, "CIDS/%012llx", dockerp->ID);
                 if ((dockfile = fopen(dock_fname, "w")) == NULL) {
-                        fprintf (stderr, "Unable to open Docker file %s, errno %d\n", dock_fname, errno);
+                        fprintf (stderr, "Unable to open Container file %s, errno %d\n", dock_fname, errno);
                         fprintf (stderr, "  Continuing without CIDS output\n");
 			CLEAR(DOCKTREE_FLAG);
                 }
@@ -434,8 +434,8 @@ print_docker_detail(void *arg1, void *arg2)
 
 	dock_printf ("\nTop Tasks sorted by physical IO\n");
 	dock_printf ("     Cnt      r/s      w/s    KB/sec    Avserv      PID  Process\n");
-	dock_printf ("--------------------  Total  -------------------- ---------------------  Write  ------------------- ---------------------  Read  --------------------\n");
-	dock_printf ("   IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv    IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv    IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv    PID    Process\n");
+	dock_printf ("---------------------  Total  --------------------- ----------------------  Write  -------------------- ----------------------  Read  ---------------------\n");
+	dock_printf ("   IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv    IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv    IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv    PID    Process\n");
         foreach_hash_entry((void **)dockerp->dkpid_hash, PID_HASHSZ,
                            (int (*)(void *, void *))print_dkpid_iosum,
                            (int (*)()) dkpid_sort_by_iocnt,
@@ -458,8 +458,8 @@ docker_print_cpu_report()
 int
 docker_print_io_report()
 {
-	BOLD("              --------------------  Total  -------------------- ---------------------  Write  ------------------- ---------------------  Read  --------------------\n");
-        BOLD("Container        IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv    IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv    IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv\n");
+	BOLD("              ---------------------  Total  --------------------- ----------------------  Write  -------------------- ----------------------  Read  ---------------------\n");
+        BOLD("Container        IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv    IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv    IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv\n");
 	foreach_hash_entry((void **)globals->docker_hash, DOCKER_HASHSZ, print_docker_iototals, docker_sort_by_iocnt, 0, NULL);
 }
 
@@ -476,8 +476,9 @@ docker_print_report(void *v)
 		dockerp->name = "system";
 	}
 
-	BOLD ("Docker Containers\n\n");
+	BOLD ("Containers\n\n");
 	print_docker_ps();
+	print_pods();
 
 	BOLD ("CPU Statistics\n\n");
 	docker_print_cpu_report();

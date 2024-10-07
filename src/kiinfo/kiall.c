@@ -62,6 +62,7 @@ kiall_winki_trace_funcs()
 	winki_enable_event(0x443, fileio_readwrite_func);
 	winki_enable_event(0x444, fileio_readwrite_func);
 	winki_enable_event(0x524, thread_cswitch_func);
+	winki_enable_event(0x529, thread_spinlock_func);
 	winki_enable_event(0x532, thread_readythread_func);
 	winki_enable_event(0x548, thread_setname_func);
 	winki_enable_event(0x60a, tcpip_sendipv4_func);
@@ -97,7 +98,6 @@ kiall_init_func(void *v)
         process_func = kiall_process_func;
 	preprocess_func = NULL;
 	if (vis) preprocess_func = kiall_preprocess_func;
-        print_func = kiall_print_func;
         report_func = kiall_report_func;
 	report_func_arg = filter_func_arg;
 	filter_func = info_filter_func;   /* no filter func for kiall, use generic */
@@ -163,6 +163,10 @@ kiall_init_func(void *v)
 	ki_actions[TRACE_SOFTIRQ_ENTRY].func = softirq_entry_func;
 	ki_actions[TRACE_SOFTIRQ_EXIT].func = softirq_exit_func;
 	ki_actions[TRACE_SOFTIRQ_RAISE].func = kiall_generic_func;
+	ki_actions[TRACE_CALL_FUNCTION_ENTRY].func = call_function_entry_func;
+	ki_actions[TRACE_CALL_FUNCTION_EXIT].func = call_function_exit_func;
+	ki_actions[TRACE_CALL_FUNCTION_SINGLE_ENTRY].func = call_function_entry_func;
+	ki_actions[TRACE_CALL_FUNCTION_SINGLE_EXIT].func = call_function_exit_func;
 	SET_KIACTION_FUNCTION(TRACE_SCSI_DISPATCH_CMD_START, kiall_generic_func);
 	SET_KIACTION_FUNCTION(TRACE_SCSI_DISPATCH_CMD_DONE, kiall_generic_func);
 	SET_KIACTION_FUNCTION(TRACE_WORKQUEUE_INSERTION, kiall_generic_func);
@@ -206,6 +210,10 @@ kiall_init_func(void *v)
 		ki_actions[TRACE_SOFTIRQ_RAISE].execute = 1;
 		ki_actions[TRACE_SOFTIRQ_ENTRY].execute = 1;
 		ki_actions[TRACE_SOFTIRQ_EXIT].execute = 1;
+		ki_actions[TRACE_CALL_FUNCTION_ENTRY].execute = 1;
+		ki_actions[TRACE_CALL_FUNCTION_EXIT].execute = 1;
+		ki_actions[TRACE_CALL_FUNCTION_SINGLE_ENTRY].execute = 1;
+		ki_actions[TRACE_CALL_FUNCTION_SINGLE_EXIT].execute = 1;
 		SET_KIACTION_EXECUTE(TRACE_SCSI_DISPATCH_CMD_START, 1);
 		SET_KIACTION_EXECUTE(TRACE_SCSI_DISPATCH_CMD_DONE, 1);
 		SET_KIACTION_EXECUTE(TRACE_WORKQUEUE_INSERTION, 1);
@@ -230,7 +238,6 @@ kiall_init_func(void *v)
                 	ki_actions[TRACE_WALLTIME].func = trace_walltime_func;
 
 		SET_KIACTION_EXECUTE(TRACE_WALLTIME, 1);
-        	/* bufmiss_func = kparse_bufmiss_func; */
 	} else {
 		SET_KIACTION_FUNCTION(TRACE_PRINT, kiall_ftrace_print_func);
 		SET_KIACTION_EXECUTE(TRACE_PRINT, 1);
@@ -246,6 +253,7 @@ kiall_init_func(void *v)
         dsk_io_sizes[7]= 500;
         dsk_io_sizes[8]= 1000;
 
+	parse_dmidecode1();
 	parse_cpuinfo();
 	parse_mem_info();
 	if (is_alive) parse_cpumaps();
@@ -254,7 +262,9 @@ kiall_init_func(void *v)
 
 	if (timestamp) {
 		parse_mpsched();
+		parse_lscpu();
 		parse_docker_ps();
+		parse_pods();
        		parse_proc_cgroup();
         	parse_lsof();
         	parse_pself();
@@ -263,6 +273,7 @@ kiall_init_func(void *v)
         	parse_ll_R();
         	parse_mpath();
         	parse_jstack();
+		parse_irqlist();
 		if (IS_LIKI) foreach_hash_entry((void **)globals->pid_hash, PID_HASHSZ, load_perpid_mapfile, NULL, 0, NULL);
 	}
 
@@ -458,7 +469,6 @@ kiall_ftrace_print_func(void *a, void *arg)
 		SET_KIACTION_EXECUTE(TRACE_CACHE_INSERT, 1);
 		SET_KIACTION_EXECUTE(TRACE_CACHE_EVICT, 1);
                 start_time = KD_CUR_TIME;
-		/* bufmiss_func = kparse_bufmiss_func; */
         }
         if (strstr(buf, ts_end_marker)) {
                 ki_actions[TRACE_BLOCK_RQ_ISSUE].execute = 0;
@@ -730,21 +740,6 @@ kiall_print_report(void *v)
 	}
 
 	return 0;
-}
-
-int
-kiall_print_func(void *v)
-{
-        int i;
-        struct timeval tod;
-
-        if ((print_flag) && (is_alive)) {
-                gettimeofday(&tod, NULL);
-                printf ("\n%s\n", ctime(&tod.tv_sec));
-                kiall_print_report(v);
-                print_flag=0;
-        }
-        return 0;
 }
 
 int

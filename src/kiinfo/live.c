@@ -64,14 +64,14 @@ extern struct utsname  utsname;
 
 #define LINES_AVAIL ((LINES-1)-lineno) 
 #define PRINT_IODETAIL_HDR(str)													\
-        if (COLS > (152+strlen(str))) {												\
-		mvprintw (lineno++, strlen(str)+2, "------------------- Total I/O -------------------- ------------------- Write I/O ------------------- -------------------- Read I/O -------------------");     \
+        if (COLS > (158+strlen(str))) {												\
+		mvprintw (lineno++, strlen(str)+2, "-------------------- Total I/O --------------------- -------------------- Write I/O -------------------- --------------------- Read I/O --------------------");     \
 		mvprintw (lineno, 0, "%s", str);										\
-                mvprintw (lineno++, strlen(str)+2, "    IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv    IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv    IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv");	\
+                mvprintw (lineno++, strlen(str)+2, "    IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv    IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv    IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv");	\
         } else {														\
-		mvprintw (lineno++, strlen(str)+2, "------------------- Total I/O --------------------");		\
+		mvprintw (lineno++, strlen(str)+2, "-------------------- Total I/O ---------------------");		\
 		mvprintw (lineno, 0, "%s", str);										\
-                mvprintw (lineno++, strlen(str)+2, "    IO/s    MB/s  AvIOsz AvInFlt   Avwait   Avserv");		\
+                mvprintw (lineno++, strlen(str)+2, "    IO/s    MB/s  AvIOsz AvInFlt    Avwait    Avserv");		\
         }
 
 static int 	next_step = FALSE;
@@ -278,6 +278,7 @@ live_winki_trace_funcs()
 	winki_enable_event(0x443, fileio_readwrite_func);
 	winki_enable_event(0x444, fileio_readwrite_func);
 	winki_enable_event(0x524, thread_cswitch_func);
+	winki_enable_event(0x529, thread_spinlock_func);
 	winki_enable_event(0x532, thread_readythread_func);
 	winki_enable_event(0x548, thread_setname_func);
 	winki_enable_event(0x60a, tcpip_sendipv4_func);
@@ -401,12 +402,14 @@ live_init_func(void *v)
 		parse_corelist();
 		parse_SQLThreadList();
 	} else {
+		parse_dmidecode1();
 		parse_cpuinfo();
 		parse_mem_info();
 		parse_uname(0);
 		parse_kallsyms();
 		parse_devices();
 		parse_docker_ps();
+		parse_pods();
         	parse_ll_R();
 	}
 
@@ -428,6 +431,7 @@ live_init_func(void *v)
 
 	if (timestamp && !IS_WINKI) {
 		parse_mpsched();
+		parse_lscpu();
 		parse_proc_cgroup();
 		parse_pself();
 		parse_edus();
@@ -435,6 +439,7 @@ live_init_func(void *v)
         	parse_lsof();
         	parse_maps();
         	parse_mpath();
+		parse_irqlist();
 		if (IS_LIKI) foreach_hash_entry((void **)globals->pid_hash, PID_HASHSZ, load_perpid_mapfile, NULL, 0, NULL);
 	}
 }
@@ -559,6 +564,7 @@ live_report_func(void *v)
 			load_symbols();
 			parse_edus();
 			parse_docker_ps();
+			parse_pods();
 		}
         }
 
@@ -647,7 +653,7 @@ print_stktrc_info_live(void *arg1, void *arg2)
                         } else {
                                 sprintf (symname, "%p", globals->symtable[key].addr);
                         }
-                } else if (key == UNKNOWN_SYMIDX) {
+                } else if (UNKNOWN_SYMIDX(key)) {
                         sprintf (symname, "unknown");
                 } else if (stktrcp->pidp) {
                         pidp = stktrcp->pidp;
@@ -707,6 +713,7 @@ print_hc_stktrc_live(void *arg1, void *arg2)
 	col=15;
         for (i=0;i<stktrcp->stklen; i++) {
 		if (LINES_AVAIL <= 0) break;
+		sym=NULL;
                 key = stktrcp->stklle.key[i];
 
 		if (IS_WINKI) {
@@ -731,7 +738,7 @@ print_hc_stktrc_live(void *arg1, void *arg2)
                         } else {
                                 sprintf (symname, "%p", globals->symtable[key].addr);
                         }
-                } else if (key == UNKNOWN_SYMIDX) {
+                } else if (UNKNOWN_SYMIDX(key)) {
                         sprintf (symname, "unknown");
                 } else if (stktrcp->pidp) {
                         pidp = stktrcp->pidp;
@@ -789,7 +796,7 @@ print_slp_info_live (void *arg1, void *arg2)
 		}
 	} else {
 		idx = slpinfop->lle.key;
-		if (idx > globals->nsyms-1) idx = UNKNOWN_SYMIDX;
+		if (idx > globals->nsyms-1) idx = UNKNOWN_KERNEL_SYMIDX;
 	}
 
         mvprintw(lineno++, col, "%8d %11.6f %9.3f %9.3f  %s",
@@ -797,7 +804,7 @@ print_slp_info_live (void *arg1, void *arg2)
                         SECS(slpinfop->sleep_time),
                         MSECS(slpinfop->sleep_time / slpinfop->count),
                         MSECS(slpinfop->max_time),
-			IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (idx == UNKNOWN_SYMIDX ? "unknown" : globals->symtable[idx].nameptr));
+			IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (UNKNOWN_SYMIDX(idx) ? "unknown" : globals->symtable[idx].nameptr));
         return 0;
 }
 
@@ -820,14 +827,14 @@ print_slpinfo_scall_live (void *arg1, void *arg2)
 		}
 	} else {
 		idx = slpinfop->lle.key;
-		if (idx > globals->nsyms-1) idx = UNKNOWN_SYMIDX;
+		if (idx > globals->nsyms-1) idx = UNKNOWN_KERNEL_SYMIDX;
 	}
 
         mvprintw(lineno++, 0, "      Sleep Func             %9d          %11.6f %10.6f  %s",
                         slpinfop->count,
                         SECS(slpinfop->sleep_time),
                         SECS(slpinfop->sleep_time / slpinfop->count),
-			IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (idx == UNKNOWN_SYMIDX ? "unknown" : globals->symtable[idx].nameptr));
+			IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (UNKNOWN_SYMIDX(idx) ? "unknown" : globals->symtable[idx].nameptr));
         return 0;
 }
 
@@ -853,7 +860,7 @@ print_iostats_summary_live (void *arg1, void *arg2)
                 	case IO_TOTAL: label="Total"; break;
 		}
 
-		mvprintw (lineno++, 0, "%6s  %7.0f %7.0f %7d %7.2f %8.2f %8.2f ",
+		mvprintw (lineno++, 0, "%6s  %7.0f %7.0f %7d %7.2f %9.3f %9.3f ",
 			label,
                         iostatsp->compl_cnt / secs,
                         (iostatsp->sect_xfrd/2048) / secs,
@@ -914,7 +921,7 @@ print_iostats_totals_live(struct iostats *iostats)
         	avserv = iostatsp->cum_ioserv/MAX(iostatsp->compl_cnt,1) / 1000000.0;
 		avinflt = (iostatsp->cum_async_inflight + iostatsp->cum_sync_inflight) / (MAX(iostatsp->issue_cnt,1) * 1.0);
 
-		mvprintw (lineno, col+(j*50), "%7.0f %7.0f %7d %7.2f %8.2f %8.2f",
+		mvprintw (lineno, col+(j*52), "%7.0f %7.0f %7d %7.2f %9.3f %9.3f",
                         iostatsp->compl_cnt/secs,
                         (iostatsp->sect_xfrd/2048)/secs,
                         (iostatsp->sect_xfrd/2)/MAX(iostatsp->compl_cnt,1),
@@ -1054,6 +1061,32 @@ print_iostats_wwn_live(void *arg1, void *arg2)
 }
 
 int
+print_ioctl_info_live(void *arg1, void *arg2)
+{
+        ioctl_info_t *ioctlp = arg1;
+        syscall_stats_t  *statp = &ioctlp->stats;
+        char *ioctl_name;
+
+	if (LINES_AVAIL < 2) return 0;
+
+        ioctl_name = get_ioctl_name(ioctlp->lle.key);
+        if (ioctl_name) {
+		mvprintw (lineno, 3, "%s", ioctl_name);
+        } else {
+                mvprintw (lineno, 3, "0x%08x", ioctlp->lle.key);
+        }
+
+        mvprintw (lineno++, 34, "%8d %8.1f %11.6f %10.6f %10.6f %7d\n",
+                statp->count,
+                statp->count / secs,
+                SECS(statp->total_time),
+                SECS(statp->total_time / statp->count),
+                SECS(statp->max_time),
+                statp->errors);
+}
+
+
+int
 print_syscall_info_live(void *arg1, void *arg2)
 {
         syscall_info_t *syscallp = arg1;
@@ -1112,6 +1145,16 @@ print_syscall_info_live(void *arg1, void *arg2)
                         mvprintw (lineno++, 0, "   %-27s                  %11.6f", 
                                 "CPU",
                                 SECS(sstatp->T_run_time));
+
+
+                if ((LINES_AVAIL > 2) && syscallp->ioctl_hash) {
+			mvprintw (lineno++, 2, "cmd:");
+                        foreach_hash_entry((void **)syscallp->ioctl_hash,
+                                                IOCTL_HASHSZ,
+                                                print_ioctl_info_live,
+                                                ioctl_sort_by_time, 0, NULL);
+                }
+
 
         	if ((LINES_AVAIL > 2) && syscallp->iov_stats) {
                		iovstatp = syscallp->iov_stats;
@@ -1275,9 +1318,8 @@ print_fdata_live(void *arg1, void *arg2)
 	}
 
         mvprintw (lineno++, 0, "File: %s", fdatap->fnameptr ? fdatap->fnameptr : "unknown");
-	printw ("   dev/ino: %d:%d/%u",
-		(fdatap->dev < 0xffffffffull) ? dev_major(fdatap->dev) : 0,
-		(fdatap->dev < 0xffffffffull) ? lun(fdatap->dev) : 0,
+	printw ("   dev/ino: 0x%llx/%u",
+        	fdatap->dev,
 		(fdatap->node >= 0) ? fdatap->node : 0);
 
 	if (fdatap->stats.last_pid > 0) {
@@ -1745,7 +1787,7 @@ print_pidcoop_window()
 			coopinfo.which = WAKER;
 			coopinfo.cnt = schedp->sched_stats.C_wakeup_cnt;
 			foreach_hash_entry((void **)schedp->setrq_tgt_hash, WPID_HSIZE,
-                             	 	live_print_setrq_pids, setrq_sort_by_sleep_time, nlines-2, (void *)&coopinfo);
+                             	 	live_print_setrq_pids, setrq_sort_by_cnt, nlines-2, (void *)&coopinfo);
 		}
 
 	
@@ -2725,7 +2767,7 @@ print_select_docker_window()
 	lineno++;
 
 	if (globals->docker_hash == NULL) {
-		mvprintw(lineno++, 0, "*** Dockers not in use on this System ***");
+		mvprintw(lineno++, 0, "*** Containers not in use on this System ***");
 		return 0;
 	}
 
@@ -3496,7 +3538,7 @@ print_docker_window()
 	lineno++;
 
 	if (globals->docker_hash == NULL) {
-		mvprintw(lineno++, 0, "*** Dockers not in use on this System ***");
+		mvprintw(lineno++, 0, "*** Containers not in use on this System ***");
 		return 0;
 	}
 
@@ -3690,7 +3732,7 @@ print_help_window()
 	mvprintw (lineno++, col, "w - Global Wait Stats");
 	mvprintw (lineno++, col, "u - Global Futex Stats");
 	mvprintw (lineno++, col, "n - Global Socket Stats"); 
-	mvprintw (lineno++, col, "k - Global Docker Stats");
+	mvprintw (lineno++, col, "k - Global Container Stats");
 
 	lineno=2; col=26;
 	mvprintw (lineno++, col, "G - Task Main Stats");
@@ -3706,7 +3748,7 @@ print_help_window()
 	mvprintw (lineno++, col, "C - Select CPU Stats");
 	mvprintw (lineno++, col, "T - Select Disk Stats");
 	mvprintw (lineno++, col, "I - Select IRQ Stats");
-	mvprintw (lineno++, col, "K - Select Docker Stats");
+	mvprintw (lineno++, col, "K - Select Container Stats");
 	mvprintw (lineno++, col, "X - Select Futex Stats");
 
 	lineno=2; col=52;

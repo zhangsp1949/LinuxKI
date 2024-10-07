@@ -33,20 +33,16 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 void *filter_func_arg;
 void *process_func_arg;
-void *print_func_arg;
 void *report_func_arg;
 void *bufmiss_func_arg;
-void *bufswtch_func_arg;
 void *alarm_func_arg;
 
 void * (*filter_func)(void *, void *);
 int (*preprocess_func)(void *, void *);
 int (*process_func)(void *, void *);
-int (*sort_func)(const void *, const void *);
-int (*print_func)(void *);
+/* int (*sort_func)(const void *, const void *); */
 int (*report_func)(void *);
 int (*bufmiss_func)(void *, void *);
-int (*bufswtch_func)(void *);
 int (*alarm_func)(void *);
 
 filter_t trace_filter;
@@ -486,6 +482,7 @@ get_next_event(int count)
 		eventp = (event_t *)trcinfop->cur_event;
 		elen = _get_event_len(eventp);
 		trcinfop->next_event = (char *)eventp + elen;
+
 		if (debug) { 
 				fprintf (stderr, "cur event - CPU %d, map_addr 0x%llx, header 0x%llx (0x%llx), cur_event 0x%llx (0x%llx) cur_time 0x%llx elen 0x%x  next_event 0x%llx (0x%llx)\n",
 					trcinfop->cpu, trcinfop->mmap_addr, 
@@ -501,6 +498,13 @@ get_next_event(int count)
 
 		if (trcinfop->next_event >= ((char *)trcinfop->header + (IS_WINKI ? 0 : HEADER_SIZE(trcinfop->header)) + trcinfop->header->commit)) {
 			trcinfop->next_event = (char *)GETNEWBUF;
+		} else if ((char *)trcinfop->next_event  >= (trcinfop->mmap_addr + trcinfop->size)) {
+			/* this is a failsafe for truncated binary files
+		 	* We will stop the trace at this point so we have consistency across the CPUs.
+ 			*/
+			fprintf (stderr, "Warning: Truncated KI binary detected for cpu %d\n", trcinfop->cpu);
+                       	fprintf (stderr, "Proceeding as if end of trace collection was found\n");
+			return NULL;
 		} else if (_get_event_len((event_t *)trcinfop->next_event) == 0) {
 			trcinfop->next_event = (char *)GETNEWBUF;
 		} else {
@@ -652,10 +656,6 @@ developers_call(int ncpus)
 {
 	trace_info_t *trcinfop;
 	event_t		*eventp;
-	int		num=0;
-	char 		*cur_rec;
-	common_t	tt_rec_ptr;
-	common_t	*rec_ptr;
 	uint64		elapsed_time;
 
 	if (debug) fprintf (stderr, "developers_call() - ncpus = %d\n", ncpus);
@@ -666,7 +666,6 @@ developers_call(int ncpus)
 
 	while (trcinfop = get_next_event(ncpus)) {
 		eventp = (event_t *)trcinfop->cur_event;
-		rec_ptr = conv_common_rec(trcinfop, &tt_rec_ptr);
 
 		trcinfop->events++;
 		last_time = trcinfop->cur_time;
@@ -686,7 +685,6 @@ developers_call(int ncpus)
 
 	secs = globals->total_secs = SECS(elapsed_time);
 
-	/* print(num, print_func, print_func_arg); */
 }
 
 /*

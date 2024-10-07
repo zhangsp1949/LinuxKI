@@ -55,7 +55,11 @@ extern int pc_rwsem_down_write_failed;
 extern int pc_kstat_irqs_usr;
 extern int pc_pcc_cpufreq_target;
 extern int pc_kvm_mmu_page_fault;
-
+extern int pc_do_numa_page;
+extern int pc_migrate_pages;
+extern int pc_pagevec_lru_move_fn;
+extern int pc_release_pages;
+extern int pc_alloc_pages_nodemask;
 
 int prof_dummy_func(void *, void *);
 int prof_ftrace_print_func(void *, void *);
@@ -65,6 +69,7 @@ prof_winki_trace_funcs()
 {
 	winki_init_actions(NULL);
 	winki_enable_event(0x30a, process_load_func);
+	winki_enable_event(0x529, thread_spinlock_func);
 	winki_enable_event(0x548, thread_setname_func);
 	winki_enable_event(0xf2e, perfinfo_profile_func);
 }
@@ -86,7 +91,6 @@ prof_init_func(void *v)
 	}
 
         process_func = NULL;
-        print_func = prof_print_func;
         report_func = prof_report_func;
         /* bufmiss_func = prof_bufmiss_func; */
         bufmiss_func =  NULL;
@@ -246,7 +250,7 @@ hc_print_pc(void *arg1, void *arg2)
 	hc_info_t *hcinfop = print_pc_args->hcinfop;
 	vtxt_preg_t *pregp;
 
-	uint64 key = UNKNOWN_SYMIDX;
+	uint64 key;
 	char *sym = NULL; 
 	char *symfile = NULL;
 	uint64 offset, symaddr;
@@ -262,7 +266,7 @@ hc_print_pc(void *arg1, void *arg2)
                         sym = win_symlookup(pregp, key, &symaddr);
 			symfile = pregp->filename;
                 }
-	} else if (key != UNKNOWN_SYMIDX) {
+	} else if (!UNKNOWN_SYMIDX(key)) {
 		if (key < globals->nsyms-1)  {
 			sym = globals->symtable[key].nameptr;
 		} else {
@@ -306,6 +310,66 @@ hc_print_pc(void *arg1, void *arg2)
 }
 
 int
+print_spin_stats(void *arg1, char *name, FILE *pidfile)
+{
+	spin_stats_t *statp = (spin_stats_t *)arg1;
+
+	if (kilive) {
+		mvprintw (lineno, 0, "%10d %10.1f %12d %10.1f %12d %10.1f %12d %10.1f  %s", 
+				statp->count, 
+				statp->count / globals->total_secs,
+				statp->waitcycles,
+				statp->waitcycles / (statp->count * 1.0),
+				statp->heldcycles,
+				statp->heldcycles / (statp->count * 1.0),
+				statp->spincnt,
+				statp->spincnt / (statp->count * 1.0),
+				name);
+	} else {
+		pid_printf (pidfile, "%s%10d %10.1f %12d %10.1f %12d %10.1f %12d %10.1f  %s", tab, 
+				statp->count, 
+				statp->count / globals->total_secs,
+				statp->waitcycles,
+				statp->waitcycles / (statp->count * 1.0),
+				statp->heldcycles,
+				statp->heldcycles / (statp->count * 1.0),
+				statp->spincnt,
+				statp->spincnt / (statp->count * 1.0),
+				name);
+		PNL;
+	}
+}
+
+
+int
+print_spin_info(void *arg1, void *arg2)
+{
+	spin_info_t *spininfop = (spin_info_t *)arg1;
+	FILE *pidfile = (FILE *)arg2;
+	uint64 addr;
+	char caller_str[256];
+	
+	/* if (spininfop->count == 0) return 0; */
+	addr = spininfop->CALLER_ADDR;
+	sprint_win_sym(caller_str, addr, NULL);
+
+	print_spin_stats(&spininfop->stats, caller_str, pidfile);
+	lineno++;
+}
+
+int print_pid_spinlock_summary(void *arg1, void *arg2)
+{
+	pid_info_t *pidp = (pid_info_t *)arg1;
+	spinlock_info_t *spinlockp;
+
+	if ((spinlockp = pidp->spinlockp) == NULL) return 0;
+
+	PID_URL_FIELD8(pidp->PID);
+	print_spin_stats(&spinlockp->stats, pidp->cmd, NULL);
+}
+
+
+int
 hc_print_pc2(void *arg1, void *arg2)
 {
 	pc_info_t *pcinfop = (pc_info_t *)arg1;
@@ -329,9 +393,9 @@ hc_print_pc2(void *arg1, void *arg2)
                         sym = win_symlookup(pregp, key, &symaddr);
 			symfile = pregp->filename;
                 }
-        } else if ((pcinfop->state != HC_USER) && ((key > globals->nsyms) || (key == UNKNOWN_SYMIDX)))  {
+        } else if ((pcinfop->state != HC_USER) && ((key > globals->nsyms) || UNKNOWN_SYMIDX(key)))  {
                 /* fall through */
-	} else if (key != UNKNOWN_SYMIDX) {
+	} else if (!UNKNOWN_SYMIDX(key)) {
 		if (pcinfop->state == HC_USER) {
 			if (objfile_preg.elfp && (key < 0x10000000)) {
 				sym = symlookup(&objfile_preg, key, &offset);
@@ -368,13 +432,17 @@ hc_print_pc2(void *arg1, void *arg2)
 		} else if ((((pcinfop->count*100.0) / hcinfop->total) > 2.0) &&
 			     (strstr(dmangle(sym), "LatchBase::AcquireInternal") ||
 			      strstr(dmangle(sym), "LatchBase::ReleaseInternal") )) {
-			RED_FONT;
 			(*print_pc_args->warnflagp) |= WARNF_SQL_STATS;
+			RED_FONT;
+		} else if ((((pcinfop->count*100.0) / hcinfop->total) > 1.0) &&
+			((key == pc_pagevec_lru_move_fn) || (key == pc_alloc_pages_nodemask) || (key == pc_release_pages))) {
+			*print_pc_args->warnflagp |= WARNF_LARGE_NUMA_NODE;
+			RED_FONT;
 		}
 	}
 		
 	if (sym == NULL) {
-		if (key == UNKNOWN_SYMIDX) {
+		if (UNKNOWN_SYMIDX(key)) {
 			printf ("%s%8d %6.2f%%  %-6s %s", tab,
 				pcinfop->count,
 				(pcinfop->count*100.0) / hcinfop->total,
@@ -430,7 +498,7 @@ hc_print_pc_sys(void *arg1, void *arg2)
 		if (pregp = get_win_pregp(idx, NULL)) {
 			symptr = win_symlookup(pregp, idx, &symaddr);
 		} 
-	} else if ((pcinfop->state == HC_USER) || (idx > globals->nsyms) || (idx == UNKNOWN_SYMIDX))  {
+	} else if ((pcinfop->state == HC_USER) || (idx > globals->nsyms) || (UNKNOWN_SYMIDX(idx)))  {
 		/* fall through */
 	} else {
 		symptr = globals->symtable[idx].nameptr;
@@ -475,12 +543,14 @@ hc_print_stktrc(void *p1, void *p2)
 	int rwsem_down_write_failed_cnt = 0;
 	int kvm_pagefault_warn_cnt = 0;
 	int cpufreq_warn_cnt = 0;
+        int migrate_pages_warn_cnt = 0;
 
 	if (stktrcp->cnt == 0) return 0;
 
 	wpct = ((float)stktrcp->cnt *100.0)/(hcinfop->total);
         pid_printf (pidfile, "%s%8d %6.2f%%",tab, stktrcp->cnt, wpct);
         for (i=0;i<stktrcp->stklen; i++) {
+		sym = NULL;
                 key = stktrcp->stklle.key[i];
 
 		if (IS_WINKI) {
@@ -501,7 +571,7 @@ hc_print_stktrc(void *p1, void *p2)
 			continue;
 		} else if (key == STACK_CONTEXT_USER) {
 			pid_printf (pidfile, "  |");
-		} else if (key == UNKNOWN_SYMIDX) {
+		} else if (UNKNOWN_SYMIDX(key)) {
 			pid_printf (pidfile, "  unknown");
 		} else if ((globals->symtable) && (key < globals->nsyms-1)) {
 			if (kparse_flag && print_pc_args->warnflagp) {
@@ -516,6 +586,7 @@ hc_print_stktrc(void *p1, void *p2)
 					else if (key == pc_kstat_irqs_usr) kstat_irqs_warn_cnt=2;
 					else if (key == pc_pcc_cpufreq_target) cpufreq_warn_cnt=2;
 					else if (key == pc_kvm_mmu_page_fault) kvm_pagefault_warn_cnt=2;
+					else if ((key == pc_do_numa_page) || (key == pc_migrate_pages)) migrate_pages_warn_cnt++;
 				}
 
 				if (hugetlb_fault_warn_cnt >= 2) {
@@ -538,6 +609,11 @@ hc_print_stktrc(void *p1, void *p2)
 					RED_FONT;
 					kvm_pagefault_warn_cnt = 0;
 					*print_pc_args->warnflagp |= WARNF_KVM_PAGEFAULT;
+                                } else if (migrate_pages_warn_cnt >= 2) {
+                                        RED_FONT;
+                                        migrate_pages_warn_cnt = 0;
+                                        *print_pc_args->warnflagp |= WARNF_MIGRATE_PAGES;
+
 				}
 			}
 			pid_printf (pidfile, "  %s", globals->symtable[key].nameptr);
@@ -819,21 +895,6 @@ prof_print_report(int ptype)
 	}
 
 	return 0;
-}
-
-int
-prof_print_func(void *v)
-{
-        int i;
-        struct timeval tod;
-
-        if ((print_flag) && (is_alive)) {
-                gettimeofday(&tod, NULL);
-                printf ("\n%s\n", ctime(&tod.tv_sec));
-                prof_print_report(PER_PASS);
-                print_flag=0;
-        }
-        return 0;
 }
 
 int

@@ -33,9 +33,12 @@ runq_info_t	ldrq[MAXLDOMS];
 runq_info_t	prev_int_ldrq[MAXLDOMS];	/* Two runq_info_t's to track delta stats */
 runq_info_t	curr_int_ldrq[MAXLDOMS];	/* for 100ms interval CPU summary.  See   */
 
+cstate_info_t  	cstates[NCSTATES];
+
 
 uint64		gbl_irq_time = 0;
 int		max_cstate = 0;
+int		cstate_names = 0;
 
 /* globals hash tables for cluster collections */
 clpid_info_t	**clpid_hash;		/* this is the globals pid hash table.  The PID and Server ID is needed to hash into this pid. */
@@ -46,6 +49,8 @@ clfutex_info_t  **clfutex_hash;
 clipip_info_t	**clipip_hash;
 clip_info_t	**cllip_hash;
 clsdata_info_t	**clsdata_hash;
+
+ntstatus_info_t **ntstatus_hash;
 
 char 	collapse_on = FALSE;		/* Used in COLLASPE_ macros */
 int	mapper_major = 253;		/* default */
@@ -1433,7 +1438,7 @@ ks_action_t ks_actions[KI_MAXSYSCALLS] = {
 	{ 0, 0, 0, ki_nosys},		/*rt_sigaction*/
 	{ 0, 0, 0, ki_nosys},		/*rt_sigprocmask*/
 	{ 0, 0, 0, ki_nosys},		/*rt_sigreturn*/
-	{ 0, 0, 1, ki_nosys},		/*ioctl*/
+	{ 1, 0, 1, ki_ioctl},		/*ioctl*/
 	{ 1, 1, 1, ki_read},		/*pread64*/
 	{ 1, 1, 1, ki_write},		/*pwrite64*/
 	{ 1, 1, 1, ki_read},		/*readv*/
@@ -1878,8 +1883,8 @@ ks_action_t ks_actions[KI_MAXSYSCALLS] = {
 	{ 0, 0, 0, ki_nosys},		/*setfsuid32*/
 	{ 0, 0, 0, ki_nosys},		/*setfsgid32*/
 	{ 1, 0, 1, ki_fcntl},		/*fcntl64*/
-	{ 0, 0, 0, ki_nosys},		/*ukn-222*/
-	{ 0, 0, 0, ki_nosys},		/*ukn-223*/
+	{ 0, 0, 0, ki_nosys},		/*ukn-461*/
+	{ 0, 0, 0, ki_nosys},		/*ukn-462*/
 	{ 0, 0, 1, ki_nosys},		/*sendfile64*/
 	{ 0, 0, 0, ki_nosys},		/*sys_set_zone_reclaim*/
 	{ 0, 0, 0, ki_nosys},		/*statfs64*/
@@ -6250,11 +6255,11 @@ syscall_arg_list_t linux_syscall_arg_list[KI_MAXSYSCALLS] = {
 {"rt_sigaction", "ret", HEX, "sig", SIGNAL, "*act", HEX, "*oact", HEX, "sigsetsize", DECIMAL, NULL, SKIP, NULL, SKIP},
 {"rt_sigprocmask", "ret", HEX, "how", SIGHOW, "*set", HEX, "*oset", HEX, "sigsetsize", DECIMAL, NULL, SKIP, NULL, SKIP},
 {"rt_sigreturn", "ret", HEX, "arg0", HEX, "arg1", HEX, "arg2", HEX, "arg3", HEX, NULL, SKIP, NULL, SKIP},
-{"ioctl", "ret", HEX, "fd", DECIMAL, "request", HEX, "arg2", HEX, "arg3", HEX, NULL, SKIP, NULL, SKIP},
+{"ioctl", "ret", HEX, "fd", DECIMAL, "request", IOCTL_REQ, "arg2", HEX, "arg3", HEX, NULL, SKIP, NULL, SKIP},
 {"pread64", "ret", HEX, "fd", DECIMAL, "*buf", HEX, "count", DECIMAL, "offset", HEX, NULL, SKIP, NULL, SKIP},
 {"pwrite64", "ret", HEX, "fd", DECIMAL, "*buf", HEX, "count", DECIMAL, "offset", HEX, NULL, SKIP, NULL, SKIP},
-{"readv", "ret", HEX, "fd", DECIMAL, "*iov", HEX, "iovcnt", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP},
-{"writev", "ret", HEX, "fd", DECIMAL, "*iov", HEX, "iovcnt", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP},
+{"readv", "ret", DECIMAL, "fd", DECIMAL, "*iov", HEX, "iovcnt", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP},
+{"writev", "ret", DECIMAL, "fd", DECIMAL, "*iov", HEX, "iovcnt", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"access", "ret", HEX, "*pathname", HEX, "mode", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"pipe", "ret", HEX, "pipefd[2]", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"select", "ret", HEX, "nfds", DECIMAL, "*readfds", HEX, "*writefds", HEX, "*exceptfds", HEX, "*timeout", HEX, NULL, SKIP},
@@ -6278,10 +6283,10 @@ syscall_arg_list_t linux_syscall_arg_list[KI_MAXSYSCALLS] = {
 {"socket", "ret", DECIMAL, "domain", SOCK_DOM, "type", SOCK_TYPE, "protocol", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"connect", "ret", HEX, "sockfd", DECIMAL, "*addr", HEX, "addrlen", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"accept", "ret", DECIMAL, "sockfd", DECIMAL, "*addr", HEX, "addrlen", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP},
-{"sendto", "ret", HEX, "sockfd", DECIMAL, "*buf", HEX, "len", DECIMAL, "flags", HEX, "*dest_addr", HEX, "addrlen", DECIMAL},
-{"recvfrom", "ret", HEX, "sockfd", DECIMAL, "*buf", HEX, "len", DECIMAL, "flags", HEX, "*src_addr", HEX, "*addrlen", HEX},
-{"sendmsg", "ret", HEX, "sockfd", DECIMAL, "*msg", HEX, "flags", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP},
-{"recvmsg", "ret", HEX, "sockfd", DECIMAL, "*msg", HEX, "flags", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP},
+{"sendto", "ret", DECIMAL, "sockfd", DECIMAL, "*buf", HEX, "len", DECIMAL, "flags", HEX, "*dest_addr", HEX, "addrlen", DECIMAL},
+{"recvfrom", "ret", DECIMAL, "sockfd", DECIMAL, "*buf", HEX, "len", DECIMAL, "flags", HEX, "*src_addr", HEX, "*addrlen", HEX},
+{"sendmsg", "ret", DECIMAL, "sockfd", DECIMAL, "*msg", HEX, "flags", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP},
+{"recvmsg", "ret", DECIMAL, "sockfd", DECIMAL, "*msg", HEX, "flags", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"shutdown", "ret", HEX, "sockfd", DECIMAL, "how", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"bind", "ret", HEX, "sockfd", DECIMAL, "*addr", HEX, "addrlen", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"listen", "ret", HEX, "sockfd", DECIMAL, "backlog", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
@@ -6568,9 +6573,9 @@ syscall_arg_list_t linux_syscall_arg_list[KI_MAXSYSCALLS] = {
 {"ukn-331", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"ukn-332", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"ukn-333", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
-{"send", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
+{"send", "ret", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"ukn-335", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
-{"recv", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
+{"recv", "ret", DECIMAL, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"ukn-337", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"ukn-338", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
 {"ukn-339", "ret", HEX, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP, NULL, SKIP},
@@ -6744,7 +6749,7 @@ warnmsg_t warnmsg[MAXNOTEWARN] = {
 	{ "Warning: Excessive Block I/O requeues detected", NULL },
 	{ "Warning: Average Service Times > 30 msecs", NULL },
 	{ "Warning: Spinlock contention detected in ext4 journal due to writes by kiinfo", NULL},
-	{ "Warning: Performance impact due to excessive page migrations on RHEL7", _HTTP_NUMA_BALANCING},
+	{ "Warning: Performance impact due to excessive page migrations", _HTTP_NUMA_BALANCING},
 	{ "Warning: Check for un-terminated lans on IXGBE network interface cards", _HTTP_UNTERMINATED_IXGBE},
 	{ "Warning: System booted with NUMA features disabled.", _HTTP_NUMA_OFF},
 	{ "Warning: Suspect large SEMMSL value causing high System CPU usage", _HTTP_SEMLOCK},
@@ -6762,14 +6767,17 @@ warnmsg_t warnmsg[MAXNOTEWARN] = {
 	{ "Warning: High CPU time or Contention on /proc/stats due to high CPU and IRQ count", _HTTP_KSTAT_IRQS}, 
 	{ "Warning: Excessive poll() calls by Oracle", _HTTP_ORACLE_POLL},
 	{ "Warning: Excessive CPU time in pcc_cpufreq driver", _HTTP_PCC_CPUFREQ},
-	{ "Warning: Side Channel Attack (Spectre/Meltdown) mitigations present", _HTTP_SSA_VULN},
+	{ "Warning: Security mitigations present", _HTTP_SSA_VULN},
 	{ "Warning: TCP Timeouts Detected", _HTTP_TCP_TIMEOUTS},
 	{ "Warning: Excessive page faults on KVM host, consider using Huge Pages", _HTTP_KVM_PAGEFAULT},
 	{ "Warning: Excessive CPU time in SQL stats code. Consider disabling stats", _HTTP_SQL_STATS},
 	{ "Warning: Excessive CPU time in Oracle column stats code. Consider disabling column stats", _HTTP_ORACLE_COLSTATS},
 	{ "Warning: Large I/Os (>1MB)  may degradge performance on PCIe Smart Array Controllers", _HTTP_CACHE_BYPASS},
 	{ "Warning: Memory is not balanced across NUMA nodes, check for missing/unconfigured memory DIMMS", NULL},
-	{ "Warning: Memory on one or more NUMA nodes is below 100 MB", NULL}
+	{ "Warning: Memory on one or more NUMA nodes is below 100 MB", NULL},
+	{ "Warning: Threads delayed on RunQ with max wait time more than 100 msecs", _HTTP_RUNQ_DELAYS},
+	{ "Warning: High System CPU utilization during memory allocations, deallocations, and page faults", _HTTP_LARGE_NUMA_NODE},
+        { "Warning: System is using clocksource other than tsc", _HTTP_CLOCKSOURCE}
 };
 
 
@@ -6831,7 +6839,8 @@ char *win_thread_wait_reason[MaxThreadWaitReasons] = {
 	"WrGuardedMutex",
 	"WrRundown",
 	"WrAlertThreadId",
-	"WrDeferredPreempt"
+	"WrDeferredPreempt",
+	"Unknown"
 };
 
 char *win_irq_flags[IRQ_NRBIT] = {
@@ -6851,4 +6860,1201 @@ char *win_irq_flags[IRQ_NRBIT] = {
 	"HoldDeviceQueue",
 	"RetryIoCOmpletion",
 	"ClassCacheOperation"
+};
+
+char *nvidiactl_ioctl[NVIDIA_NRCTLS] = {
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",			/* 0x10 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",			/* 0x20 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_CREATE_VSPACE",   	/* 0x27 */
+	"NVIDIA_IOCTL_CREATE_SIMPLE",   	/* 0x28 */
+	"NVIDIA_IOCTL_DESTROY",		   	/* 0x29 */
+	"NVIDIA_IOCTL_CALL",		   	/* 0x2a */
+	"NVIDIA_IOCTL_CREATE",		   	/* 0x2b */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",			/* 0x30 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_GET_PARAM", 	  	/* 0x32 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_QUERY",           	/* 0x37 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",			/* 0x40 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_MEMORY",			/* 0x4a */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",			/* 0x4d */
+	"NVIDIA_IOCTL_HOST_MAP",		/* 0x4e */
+	"NVIDIA_IOCTL_HOST_UNMAP",		/* 0x4f */
+	"NVIDIA_IOCTL_?",			/* 0x50 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_CREATE_DMA",		/* 0x54 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_VSPACE_MAP",		/* 0x57 */
+	"NVIDIA_IOCTL_VSPACE_UNMAP",		/* 0x58 */
+	"NVIDIA_IOCTL_BIND",			/* 0x59 */
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",
+	"NVIDIA_IOCTL_?",			/* 0x5e */
+	"NVIDIA_IOCTL_?",			/* 0x5f */
+	"NVIDIA_IOCTL_?",			/* 0x60 */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			/* 0x70 */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			/* 0x80 */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			/* 0x90 */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			/* 0xa0 */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			/* 0xb0 */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			/* 0xc0 */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_CARD_INFO",			/* 0xc8 */
+	"NVIDIA_IOCTL_?",					
+	"NVIDIA_IOCTL_ENV_INFO",			/* 0xca */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_CREATE_OS_EVENT", 		/* 0xce */
+	"NVIDIA_IOCTL_DESTROY_OS_EVENT", 		/* 0xcf */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_CHECK_VERSION_STR",		/* 0xd2 */
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?",			
+	"NVIDIA_IOCTL_?"
+};
+
+char *uvm_ioctl[UVM_NRCTLS] = {
+        "UVM_IOCTL?",
+	"UVM_RESERVE_VA",
+	"UVM_RELEASE_VA",
+	"UVM_REGION_COMMIT",
+	"UVM_REGION_DECOMMIT",
+	"UVM_REGION_SET_STREAM",
+	"UVM_SET_STREAM_RUNNING",
+	"UVM_SET_STREAM_STOPPED",
+	"UVM_IOCTL?",
+	"UVM_RUN_TEST",
+	"UVM_ADD_SESSION",
+	"UVM_REMOVE_SESSION",
+	"UVM_ENABLE_COUNTERS",
+	"UVM_MAP_COUNTER",
+	"UVM_CREATE_EVENT_QUEUE",
+	"UVM_REMOVE_EVENT_QUEUE",
+	"UVM_MAP_EVENT_QUEUE",
+	"UVM_EVENT_CTRL",
+	"UVM_REGISTER_MPS_SERVER",
+	"UVM_REGISTER_MPS_CLIENT",
+	"UVM_GET_GPU_UUID_TABLE",
+	"UVM_REGION_SET_BACKING",
+	"UVM_REGION_UNSET_BACKING",
+	"UVM_CREATE_RANGE_GROUP",
+	"UVM_DESTROY_RANGE_GROUP",
+	"UVM_REGISTER_GPU_VASPACE",
+	"UVM_UNREGISTER_GPU_VASPACE",
+	"UVM_REGISTER_CHANNEL",
+	"UVM_UNREGISTER_CHANNEL",
+	"UVM_ENABLE_PEER_ACCESS",
+	"UVM_DISABLE_PEER_ACCESS",
+	"UVM_SET_RANGE_GROUP"
+	"UVM_IOCTL?",
+	"UVM_MAP_EXTERNAL_ALLOCATION",
+	"UVM_FREE",
+	"UVM_MEM_MAP",
+	"UVM_DEBUG_ACCESS_MEMORY",
+	"UVM_REGISTER_GPU",
+	"UVM_UNREGISTER_GPU",
+	"PAGEABLE_MEM_ACCESS",
+	"UVM_PREVENT_MIGRATION_RANGE_GROUPS",
+	"UVM_ALLOW_MIGRATION_RANGE_GROUPS",
+	"UVM_SET_PREFERRED_LOCATION",
+	"UVM_UNSET_PREFERRED_LOCATION",
+	"UVM_ENABLE_READ_DUPLICATION",
+	"UVM_DISABLE_READ_DUPLICATION",
+	"UVM_SET_ACCESSED_BY",
+	"UVM_UNSET_ACCESSED_BY",
+	"UVM_IOCTL?",
+	"UVM_IOCTL?",
+	"UVM_IOCTL?",
+	"UVM_MIGRATE",
+	"UVM_IOCTL?",
+	"UVM_MIGRATE_RANGE_GROUP",
+	"UVM_ENABLE_SYSTEM_WIDE_ATOMICS",
+	"UVM_DISABLE_SYSTEM_WIDE_ATOMICS",
+	"UVM_TOOLS_INIT_EVENT_TRACKER",
+	"UVM_TOOLS_SET_NOTIFICATION_THRESHOLD",
+	"UVM_TOOLS_EVENT_QUEUE_ENABLE_EVENTS",
+	"UVM_TOOLS_EVENT_QUEUE_DISABLE_EVENTS",
+	"UVM_TOOLS_ENABLE_COUNTERS",
+	"UVM_TOOLS_DISABLE_COUNTERS",
+	"UVM_TOOLS_READ_PROCESS_MEMORY",
+	"UVM_TOOLS_WRITE_PROCESS_MEMORY",
+	"UVM_TOOLS_GET_PROCESSOR_UUID_TABLE",
+	"UVM_MAP_DYNAMIC_PARALLELISM_REGION",
+	"UVM_UNMAP_EXTERNAL",
+	"UVM_TOOLS_FLUSH_EVENTS",
+	"UVM_ALLOC_SEMAPHORE_POOL",
+	"UVM_CLEAN_UP_ZOMBIE_RESOURCES",
+	"UVM_PAGEABLE_MEM_ACCESS_ON_GPU",
+	"UVM_POPULATE_PAGEABLE",
+	"UVM_VALIDATE_VA_RANGE",
+	"UVM_CREATE_EXTERNAL_RANGE",
+	"UVM_MAP_EXTERNAL_SPARSE",
+	"UVM_MM_INITIALIZE",
+	"UVM_IOCTL?",
+	"UVM_IOCTL?",
+	"UVM_IOCTL?",
+	"UVM_IOCTL?"
+};
+
+
+char *drm_ioctl[DRM_NRCTLS] = {
+	"DRM_IOCTL_VERSION",
+	"DRM_IOCTL_GET_UNIQUE",
+	"DRM_IOCTL_GET_MAGIC",
+	"DRM_IOCTL_IRQ_BUSID",
+	"DRM_IOCTL_GET_MAP", 
+	"DRM_IOCTL_GET_CLIENT",
+	"DRM_IOCTL_GET_STATS",
+	"DRM_IOCTL_SET_VERSION",
+	"DRM_IOCTL_MODESET_CTL",
+	"DRM_IOCTL_GEM_CLOSE",
+	"DRM_IOCTL_GEM_FLINK",
+	"DRM_IOCTL_GEM_OPEN",
+	"DRM_IOCTL_GET_CAP",
+	"DRM_IOCTL_SET_CLIENT_CAP",
+	"DRM_IOCTL_?",				
+	"DRM_IOCTL_?",
+	"DRM_IOCTL_SET_UNIQUE",			/* 0x10 */
+	"DRM_IOCTL_AUTH_MAGIC",
+	"DRM_IOCTL_BLOCK",
+	"DRM_IOCTL_UNBLOCK",
+	"DRM_IOCTL_CONTROL",
+	"DRM_IOCTL_ADD_MAP",
+	"DRM_IOCTL_ADD_BUFS",
+	"DRM_IOCTL_MARK_BUFS",
+	"DRM_IOCTL_INFO_BUFS",
+	"DRM_IOCTL_MAP_BUFS",
+	"DRM_IOCTL_FREE_BUFS",
+	"DRM_IOCTL_RM_MAP",
+	"DRM_IOCTL_SET_SAREA_CTX",
+	"DRM_IOCTL_GET_SAREA_CTX",
+	"DRM_IOCTL_SET_MASTER",
+	"DRM_IOCTL_DROP_MASTER",
+	"DRM_IOCTL_ADD_CTX",			/* 0x20 */
+	"DRM_IOCTL_RM_CTX",
+	"DRM_IOCTL_MOD_CTX",
+	"DRM_IOCTL_GET_CTX",
+	"DRM_IOCTL_SWITCH_CTX",
+	"DRM_IOCTL_NEW_CTX",
+	"DRM_IOCTL_RES_CTX",
+	"DRM_IOCTL_ADD_DRAW",
+	"DRM_IOCTL_RM_DRAW",
+	"DRM_IOCTL_DMA",				
+	"DRM_IOCTL_LOCK",
+	"DRM_IOCTL_UNLOCK",
+	"DRM_IOCTL_FINISH",
+	"DRM_IOCTL_PRIME_HANDLE_TO_FD",	
+	"DRM_IOCTL_PRIMT_FD_TO_HANDLE",
+	"DRM_IOCTL_?",
+	"DRM_IOCTL_AGP_ACQUIRE",		/* 0x30 */
+	"DRM_IOCTL_AGP_RELEASE",
+	"DRM_IOCTL_AGP_ENABLE",
+	"DRM_IOCTL_AGP_INFO",
+	"DRM_IOCTL_AGP_ALLOC",
+	"DRM_IOCTL_AGP_FREE",
+	"DRM_IOCTL_AGP_BIND",
+	"DRM_IOCTL_AGP_UNBIND",
+	"DRM_IOCTL_SG_ALLOC",
+	"DRM_IOCTL_SG_FREE",
+	"DRM_IOCTL_WAIT_VBLANK",	
+	"DRM_IOCTL_CRTC_GET_SEQUENCE",
+	"DRM_IOCTL_CRTC_QUEUE_SEQUENCE",
+	"DRM_IOCTL_?",
+	"DRM_IOCTL_?",
+	"DRM_IOCTL_UPDATE_DRAW",
+	"DRM_NVIDIA_GET_CRTC_CRC32",				/* DRM_COMMAND_BASE 0x40 */
+	"DRM_NVIDIA_GEM_IMPORT_NVKMS_MEMORY",
+	"DRM_NVIDIA_GEM_IMPORT_USERSPACE_MEMORY",
+	"DRM_NVIDIA_GET_DEV_INFO",
+	"DRM_NVIDIA_FENCE_SUPPORTED",
+	"DRM_NVIDIA_PRIME_FENCE_CONTEXT_CREATE",
+	"DRM_NVIDIA_GEM_PRIME_FENCE_ATTACH",
+	"DRM_NVIDIA_GET_CLIENT_CAPABILITY",
+	"DRM_NVIDIA_GEM_EXPORT_NVKMS_MEMORY",
+	"DRM_NVIDIA_GEM_MAP_OFFSET",
+	"DRM_NVIDIA_GEM_ALLOC_NVKMS_MEMORY",
+	"DRM_NVIDIA_GET_CRTC_CRC32_V2",
+	"DRM_NVIDIA_GEM_EXPORT_DMABUF_MEMORY",
+	"DRM_NVIDIA_GEM_IDENTIFY_OBJECT",
+	"DRM_NVIDIA_DMABUF_SUPPORTED",
+	"DRM_NVIDIA_GET_DPY_ID_FOR_CONNECTOR_ID",
+	"DRM_NVIDIA_GET_CONNECTOR_ID_FOR_DPY_ID",	/* +0x10 */
+	"DRM_NVIDIA_GRANT_PERMISSIONS",
+	"DRM_NVIDIA_REVOKE_PERMISSIONS",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",					/* +0x20 */
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",					/* +0x30 */
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",					/* +0x40 */
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",					/* +0x50 */
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_NVIDIA_?",
+	"DRM_IOCTL_MODE_GETRESOURCES",			/* 0xa0 */
+	"DRM_IOCTL_MODE_GETCRTC",
+	"DRM_IOCTL_MODE_SETCRTC",
+	"DRM_IOCTL_MODE_CURSOR",
+	"DRM_IOCTL_MODE_GETGAMMA",
+	"DRM_IOCTL_MODE_SETGAMMA",
+	"DRM_IOCTL_MODE_GETENCODER",
+	"DRM_IOCTL_MODE_GETCONNECTOR",
+	"DRM_IOCTL_MODE_ATTACHMODE",
+	"DRM_IOCTL_MODE_DETACHMODE",
+	"DRM_IOCTL_MODE_GETPROPERTY",
+	"DRM_IOCTL_MODE_SETPROPERTY",	
+	"DRM_IOCTL_MODE_GETPROPBLOB",
+	"DRM_IOCTL_MODE_GETFB",
+	"DRM_IOCTL_MODE_ADDFB",
+	"DRM_IOCTL_MODE_RMFB",
+	"DRM_IOCTL_MODE_PAGE_FLIP",			/* 0xb0 */
+	"DRM_IOCTL_MODE_DIRTYFB",
+	"DRM_IOCTL_MODE_CREATE_DUMB",
+	"DRM_IOCTL_MODE_MAP_DUMB",
+	"DRM_IOCTL_MODE_DESTROY_DUMB",
+	"DRM_IOCTL_MODE_GETPLANERESOURCES",
+	"DRM_IOCTL_MODE_GETPLANE",
+	"DRM_IOCTL_MODE_SETPLANE",
+	"DRM_IOCTL_MODE_ADDFB2",
+	"DRM_IOCTL_MODE_OBJ_GETPROPERTIES",
+	"DRM_IOCTL_MODE_OBJ_SETPROPERTY",
+	"DRM_IOCTL_MODE_CURSOR2",
+	"DRM_IOCTL_MODE_ATOMIC",
+	"DRM_IOCTL_MODE_CREATEPROPBLOB",
+	"DRM_IOCTL_MODE_DESTROYPROPBLOB",
+	"DRM_IOCTL_SYNCOBJ_CREATE",
+	"DRM_IOCTL_SYNCOBJ_DESTROY",			/* 0xc0 */
+	"DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD",
+	"DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE",
+	"DRM_IOCTL_SYNCOBJ_WAIT",
+	"DRM_IOCTL_SYNCOBJ_RESET",
+	"DRM_IOCTL_SYNCOBJ_SIGNAL",
+	"DRM_IOCTL_MODE_CREATE_LEASE",
+	"DRM_IOCTL_MODE_LIST_LESSEES",
+	"DRM_IOCTL_MODE_GET_LEASE",
+	"DRM_IOCTL_MODE_REVOKE_LEASE",
+	"DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT",		
+	"DRM_IOCTL_SYNCOBJ_QUERY",
+	"DRM_IOCTL_SYNCOBJ_TRANSFER",
+	"DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL",
+	"DRM_IOCTL_MODE_GETFB2",
+	"DRM_IOCTL_?",
+};
+
+char *dm_ioctl[DM_NRCTLS] = {
+       /* Top level cmds */
+       "DM_VERSION",               /* 0x0 */
+       "DM_REMOVE_ALL",               /* 0x1 */
+       "DM_LIST_DEVICES",               /* 0x2 */
+
+       /* device level cmds */
+       "DM_DEV_CREATE",               /* 0x3 */
+       "DM_DEV_REMOVE",               /* 0x4 */
+       "DM_DEV_RENAME",               /* 0x5 */
+       "DM_DEV_SUSPEND",               /* 0x6 */
+       "DM_DEV_STATUS",               /* 0x7 */
+       "DM_DEV_WAIT",               /* 0x8 */
+
+       /* Table level cmds */
+       "DM_TABLE_LOAD",               /* 0x9 */
+       "DM_TABLE_CLEAR",               /* 0xa */
+       "DM_TABLE_DEPS",               /* 0xb */
+       "DM_TABLE_STATUS",               /* 0xc */
+
+       /* Added later */
+       "DM_LIST_VERSIONS",               /* 0xd */
+       "DM_TARGET_MSG",               /* 0xe */
+       "DM_DEV_SET_GEOMETRY",               /* 0xf */
+       "DM_DEV_ARM_POLL",               /* 0x10 */
+       "DM_GET_TARGET_VERSION"               /* 0x11 */
+};
+
+/* KVM ioctls have some duplicates.   For now, we will print just the first one listed in the
+ * following URL:
+ *
+ * https://github.com/torvalds/linux/blob/master/include/uapi/linux/kvm.h
+ */
+
+char *kvm_ioctl[KVM_NRCTLS] = {
+/*
+ *  * ioctls for /dev/kvm fds:
+ *   */
+       "KVM_GET_API_VERSION",               /* 0x00 */
+       "KVM_CREATE_VM",               /* 0x01 */
+       "KVM_GET_MSR_INDEX_LIST",               /* 0x02 */
+       "KVM_CHECK_EXTENSION",               /* 0x03 */
+       "KVM_GET_VCPU_MMAP_SIZE",               /* 0x04 */
+       "KVM_GET_SUPPORTED_CPUID",               /* 0x05 */	   
+       "KVM_S390_ENABLE_SIE",               /* 0x06 */
+	   "KVM_?",								/* 0x07 */
+	   "KVM_?",								/* 0x08 */	   
+       "KVM_GET_EMULATED_CPUID",               /* 0x09 */
+       "KVM_GET_MSR_FEATURE_INDEX_LIST",       /* 0x0a */
+	   "KVM_?",								/* 0x0b */
+	   "KVM_?",								/* 0x0c */
+	   "KVM_?",								/* 0x0d */
+	   "KVM_?",								/* 0x0e */
+	   "KVM_?",								/* 0x0f */
+	   "KVM_?",								/* 0x10 */
+	   "KVM_?",								/* 0x11 */
+	   "KVM_?",								/* 0x12 */
+	   "KVM_?",								/* 0x13 */
+	   "KVM_?",								/* 0x14 */
+	   "KVM_?",								/* 0x15 */
+	   "KVM_?",								/* 0x16 */
+	   "KVM_?",								/* 0x17 */
+	   "KVM_?",								/* 0x18 */
+	   "KVM_?",								/* 0x19 */
+	   "KVM_?",								/* 0x1a */
+	   "KVM_?",								/* 0x1b */
+	   "KVM_?",								/* 0x1c */
+	   "KVM_?",								/* 0x1d */
+	   "KVM_?",								/* 0x1e */
+	   "KVM_?",								/* 0x1f */
+	   "KVM_?",								/* 0x20 */
+	   "KVM_?",								/* 0x21 */
+	   "KVM_?",								/* 0x22 */
+	   "KVM_?",								/* 0x23 */
+	   "KVM_?",								/* 0x24 */
+	   "KVM_?",								/* 0x25 */
+	   "KVM_?",								/* 0x26 */
+	   "KVM_?",								/* 0x27 */
+	   "KVM_?",								/* 0x28 */
+	   "KVM_?",								/* 0x29 */
+	   "KVM_?",								/* 0x2a */
+	   "KVM_?",								/* 0x2b */
+	   "KVM_?",								/* 0x2c */
+	   "KVM_?",								/* 0x2d */
+	   "KVM_?",								/* 0x2e */
+	   "KVM_?",								/* 0x2f */
+	   "KVM_?",								/* 0x30 */
+	   "KVM_?",								/* 0x31 */
+	   "KVM_?",								/* 0x32 */
+	   "KVM_?",								/* 0x33 */
+	   "KVM_?",								/* 0x34 */
+	   "KVM_?",								/* 0x35 */
+	   "KVM_?",								/* 0x36 */
+	   "KVM_?",								/* 0x37 */
+	   "KVM_?",								/* 0x38 */
+	   "KVM_?",								/* 0x39 */
+	   "KVM_?",								/* 0x3a */
+	   "KVM_?",								/* 0x3b */
+	   "KVM_?",								/* 0x3c */
+	   "KVM_?",								/* 0x3d */
+	   "KVM_?",								/* 0x3e */
+	   "KVM_?",								/* 0x3f */ 
+	   "KVM_?",								/* 0x40 */
+       "KVM_CREATE_VCPU",               /* 0x41 */
+       "KVM_GET_DIRTY_LOG",               /* 0x42 */
+	   "KVM_?",								/* 0x43 */
+       "KVM_SET_NR_MMU_PAGES",               /* 0x44 */
+       "KVM_GET_NR_MMU_PAGES",               /* 0x45 */
+       "KVM_SET_USER_MEMORY_REGION",               /* 0x46 */
+       "KVM_SET_TSS_ADDR",               /* 0x47 */
+       "KVM_SET_IDENTITY_MAP_ADDR",               /* 0x48 */
+       "KVM_SET_USER_MEMORY_REGION2",               /* 0x49 */
+	   "KVM_?",								/* 0x4a */
+	   "KVM_?",								/* 0x4b */
+	   "KVM_?",								/* 0x4c */
+	   "KVM_?",								/* 0x4d */
+	   "KVM_?",								/* 0x4e */
+	   "KVM_?",								/* 0x4f */
+       "KVM_S390_UCAS_MAP",               /* 0x50 */
+       "KVM_S390_UCAS_UNMAP",               /* 0x51 */
+       "KVM_S390_VCPU_FAULT",               /* 0x52 */
+	   "KVM_?",               /* 0x53 */
+	   "KVM_?",               /* 0x54 */
+	   "KVM_?",               /* 0x55 */
+	   "KVM_?",               /* 0x56 */
+	   "KVM_?",               /* 0x57 */
+	   "KVM_?",               /* 0x58 */
+	   "KVM_?",               /* 0x59 */
+	   "KVM_?",               /* 0x5a */
+	   "KVM_?",               /* 0x5b */
+	   "KVM_?",               /* 0x5c */
+	   "KVM_?",               /* 0x5d */
+	   "KVM_?",               /* 0x5e */
+	   "KVM_?",               /* 0x5f */
+       "KVM_CREATE_IRQCHIP",               /* 0x60 */
+       "KVM_IRQ_LINE",               /* 0x61 */
+       "KVM_GET_IRQCHIP",               /* 0x62 */
+       "KVM_SET_IRQCHIP",               /* 0x63 */
+       "KVM_CREATE_PIT",               /* 0x64 */
+       "KVM_GET_PIT",               /* 0x65 */
+       "KVM_SET_PIT",               /* 0x66 */
+       "KVM_IRQ_LINE_STATUSIO",               /* 0x67 */
+       "KVM_UNREGISTER_COALESCED_MMIO",               /* 0x68 */
+	   "KVM_?",               /* 0x69 */	   
+       "KVM_SET_GSI_ROUTING",               /* 0x6a */
+	   "KVM_?",               /* 0x6b */
+	   "KVM_?",               /* 0x6c */
+	   "KVM_?",               /* 0x6d */
+	   "KVM_?",               /* 0x6e */
+	   "KVM_?",               /* 0x6f */
+	   "KVM_?",               /* 0x70 */
+       "KVM_REINJECT_CONTROL",               /* 0x71 */
+	   "KVM_?",               /* 0x72 */
+	   "KVM_?",               /* 0x73 */
+	   "KVM_?",               /* 0x74 */
+	   "KVM_?",               /* 0x75 */
+       "KVM_IRQFD",               /* 0x76 */
+       "KVM_CREATE_PIT2",               /* 0x77 */
+       "KVM_SET_BOOT_CPU_ID",               /* 0x78 */
+       "KVM_IOEVENTFD",               /* 0x79 */
+       "KVM_XEN_HVM_CONFIG",               /* 0x7a */
+       "KVM_SET_CLOCK",               /* 0x7b */
+       "KVM_GET_CLOCK",               /* 0x7c */
+	   "KVM_?",               /* 0x7d */
+	   "KVM_?",               /* 0x7e */
+	   "KVM_?",               /* 0x7f */
+       "KVM_RUN",               /* 0x80 */
+       "KVM_GET_REGS",               /* 0x81 */
+       "KVM_SET_REGS",               /* 0x82 */
+       "KVM_GET_SREGS",               /* 0x83 */
+       "KVM_SET_SREGS",               /* 0x84 */
+       "KVM_TRANSLATE",               /* 0x85 */
+       "KVM_INTERRUPT",               /* 0x86 */
+	   "KVM_?",               /* 0x87 */
+       "KVM_GET_MSRS",               /* 0x88 */
+       "KVM_SET_MSRS",               /* 0x89 */
+       "KVM_SET_CPUID",               /* 0x8a */
+       "KVM_SET_SIGNAL_MASK",               /* 0x8b */
+       "KVM_GET_FPU",               /* 0x8c */
+       "KVM_SET_FPU",               /* 0x8d */
+       "KVM_GET_LAPIC",               /* 0x8e */
+       "KVM_SET_LAPIC",               /* 0x8f */
+       "KVM_SET_CPUID2",               /* 0x90 */
+       "KVM_GET_CPUID2",               /* 0x91 */
+       "KVM_TPR_ACCESS_REPORTING",               /* 0x92 */
+       "KVM_SET_VAPIC_ADDR",               /* 0x93 */
+       "KVM_S390_INTERRUPT",               /* 0x94 */
+       "KVM_S390_STORE_STATUS",               /* 0x95 */
+       "KVM_S390_SET_INITIAL_PSW",               /* 0x96 */
+       "KVM_S390_INITIAL_RESET",               /* 0x97 */
+       "KVM_GET_MP_STATE",               /* 0x98 */
+       "KVM_SET_MP_STATE",               /* 0x99 */
+       "KVM_NMI",               /* 0x9a */
+       "KVM_SET_GUEST_DEBUG",               /* 0x9b */
+       "KVM_X86_SETUP_MCE",               /* 0x9c */
+       "KVM_X86_GET_MCE_CAP_SUPPORTED",   /* 0x9d */
+       "KVM_X86_SET_MCE",               /* 0x9e */
+       "KVM_GET_PIT2",               /* 0x9f */
+       "KVM_SET_PIT2",               /* 0xa0 */
+       "KVM_PPC_GET_PVINFO",               /* 0xa1 */
+       "KVM_SET_TSC_KHZ",               /* 0xa2 */
+       "KVM_GET_TSC_KHZ",               /* 0xa3 */
+       "KVM_GET_XSAVE",               /* 0xa4 */
+       "KVM_SIGNAL_MSI",               /* 0xa5 */
+       "KVM_PPC_GET_SMMU_INFO",               /* 0xa6 */
+       "KVM_PPC_ALLOCATE_HTAB",               /* 0xa7 */
+       "KVM_CREATE_SPAPR_TCE",               /* 0xa8 */
+       "KVM_ALLOCATE_RMA",               /* 0xa9 */
+       "KVM_PPC_GET_HTAB_FD",               /* 0xaa */
+       "KVM_ARM_SET_DEVICE_ADDR",               /* 0xab */
+       "KVM_PPC_RTAS_DEFINE_TOKEN",               /* 0xac */
+       "KVM_PPC_RESIZE_HPT_PREPARE",               /* 0xad */
+       "KVM_PPC_RESIZE_HPT_COMMIT",               /* 0xae */
+       "KVM_PPC_CONFIGURE_V3_MMU",               /* 0xaf */
+       "KVM_PPC_GET_RMMU_INFO",               /* 0xb0 */
+       "KVM_PPC_GET_CPU_CHAR",               /* 0xb1 */
+       "KVM_SET_PMU_EVENT_FILTER",               /* 0xb2 */
+       "KVM_PPC_SVM_OFF",               /* 0xb3 */
+       "KVM_ARM_MTE_COPY_TAGS",               /* 0xb4 */
+       "KVM_ARM_SET_COUNTER_OFFSET",               /* 0xb5 */
+       "KVM_ARM_GET_REG_WRITABLE_MASKS",               /* 0xb6 */
+       "KVM_SMI",               /* 0xb7 */
+       "KVM_S390_GET_CMMA_BITS",               /* 0xb8 */
+       "KVM_S390_SET_CMMA_BITS",               /* 0xb9 */
+       "KVM_MEMORY_ENCRYPT_OP",               /* 0xba */
+       "KVM_MEMORY_ENCRYPT_REG_REGION",               /* 0xbb */
+       "KVM_MEMORY_ENCRYPT_UNREG_REGION",               /* 0xbc */
+       "KVM_HYPERV_EVENTFD",               /* 0xbd */
+       "KVM_GET_NESTED_STATE",               /* 0xbe */
+       "KVM_SET_NESTED_STATE",               /* 0xbf */
+       "KVM_CLEAR_DIRTY_LOG",               /* 0xc0 */
+       "KVM_GET_SUPPORTED_HV_CPUID",               /* 0xc1 */
+       "KVM_ARM_VCPU_FINALIZE",               /* 0xc2 */
+       "KVM_S390_NORMAL_RESET",               /* 0xc3 */
+       "KVM_S390_CLEAR_RESET",               /* 0xc4 */
+       "KVM_S390_PV_COMMAND",               /* 0xc5 */
+       "KVM_X86_SET_MSR_FILTER",               /* 0xc6 */
+       "KVM_RESET_DIRTY_RINGS",               /* 0xc7 */
+       "KVM_XEN_HVM_GET_ATTR",               /* 0xc8 */
+       "KVM_XEN_HVM_SET_ATTR",               /* 0xc9 */
+       "KVM_XEN_VCPU_GET_ATTR",               /* 0xca */
+       "KVM_XEN_VCPU_SET_ATTR",               /* 0xcb */
+	   "KVM_GET_SREGS2",               /* 0xcc */
+       "KVM_SET_SREGS2",               /* 0xcd */
+       "KVM_GET_STATS_FD",               /* 0xce */
+       "KVM_GET_XSAVE2",               /* 0xcf */
+       "KVM_XEN_HVM_EVTCHN_SEND",               /* 0xd0 */
+       "KVM_S390_ZPCI_OP",               /* 0xd1 */
+       "KVM_SET_MEMORY_ATTRIBUTES",               /* 0xd2 */
+	   "KVM_?",               /* 0xd3 */
+       "KVM_CREATE_GUEST_MEMFD"               /* 0xd4 */
+       "KVM_?"               /* 0xd5 */	   
+	   "KVM_?"               /* 0xd6 */
+	   "KVM_?"               /* 0xd7 */
+	   "KVM_?"               /* 0xd8 */
+	   "KVM_?"               /* 0xd9 */
+	   "KVM_?"               /* 0xda */
+	   "KVM_?"               /* 0xdb */
+	   "KVM_?"               /* 0xdc */
+	   "KVM_?"               /* 0xdd */
+	   "KVM_?"               /* 0xde */
+	   "KVM_?"               /* 0xdf */
+       "KVM_CREATE_DEVICE",               /* 0xe0 */
+       "KVM_SET_DEVICE_ATTR",               /* 0xe1 */
+       "KVM_GET_DEVICE_ATTR",               /* 0xe2 */
+       "KVM_HAS_DEVICE_ATTR",               /* 0xe3 */
+	   "KVM_?",               /* 0xe4 */
+	   "KVM_?",               /* 0xe5 */
+	   "KVM_?",               /* 0xe6 */
+	   "KVM_?",               /* 0xe7 */
+	   "KVM_?",               /* 0xe8 */
+	   "KVM_?",               /* 0xe9 */
+	   "KVM_?",               /* 0xea */
+	   "KVM_?",               /* 0xeb */
+	   "KVM_?",               /* 0xec */
+	   "KVM_?",               /* 0xed */
+	   "KVM_?",               /* 0xee */
+	   "KVM_?"               /* 0xef */
+};
+
+#if 0
+char *kvm_ioctl[KVM_NRCTLS] = {
+/*
+ *  * ioctls for /dev/kvm fds:
+ *   */
+       "KVM_GET_API_VERSION",               /* 0x00 */
+       "KVM_CREATE_VM",               /* 0x01 */
+       "KVM_GET_MSR_INDEX_LIST",               /* 0x02 */
+       "KVM_CHECK_EXTENSION",               /* 0x03 */
+       "KVM_GET_VCPU_MMAP_SIZE",               /* 0x04 */
+       "KVM_GET_SUPPORTED_CPUID",               /* 0x05 */	   
+       "KVM_S390_ENABLE_SIE",               /* 0x06 */
+	   "KVM_?",								/* 0x07 */
+	   "KVM_?",								/* 0x08 */	   
+       "KVM_GET_EMULATED_CPUID",               /* 0x09 */
+       "KVM_GET_MSR_FEATURE_INDEX_LIST",       /* 0x0a */
+	   "KVM_?",								/* 0x0b */
+	   "KVM_?",								/* 0x0c */
+	   "KVM_?",								/* 0x0d */
+	   "KVM_?",								/* 0x0e */
+	   "KVM_?",								/* 0x0f */
+	   "KVM_?",								/* 0x10 */
+	   "KVM_?",								/* 0x11 */
+	   "KVM_?",								/* 0x12 */
+	   "KVM_?",								/* 0x13 */
+	   "KVM_?",								/* 0x14 */
+	   "KVM_?",								/* 0x15 */
+	   "KVM_?",								/* 0x16 */
+	   "KVM_?",								/* 0x17 */
+	   "KVM_?",								/* 0x18 */
+	   "KVM_?",								/* 0x19 */
+	   "KVM_?",								/* 0x1a */
+	   "KVM_?",								/* 0x1b */
+	   "KVM_?",								/* 0x1c */
+	   "KVM_?",								/* 0x1d */
+	   "KVM_?",								/* 0x1e */
+	   "KVM_?",								/* 0x1f */
+	   "KVM_?",								/* 0x20 */
+	   "KVM_?",								/* 0x21 */
+	   "KVM_?",								/* 0x22 */
+	   "KVM_?",								/* 0x23 */
+	   "KVM_?",								/* 0x24 */
+	   "KVM_?",								/* 0x25 */
+	   "KVM_?",								/* 0x26 */
+	   "KVM_?",								/* 0x27 */
+	   "KVM_?",								/* 0x28 */
+	   "KVM_?",								/* 0x29 */
+	   "KVM_?",								/* 0x2a */
+	   "KVM_?",								/* 0x2b */
+	   "KVM_?",								/* 0x2c */
+	   "KVM_?",								/* 0x2d */
+	   "KVM_?",								/* 0x2e */
+	   "KVM_?",								/* 0x2f */
+	   "KVM_?",								/* 0x30 */
+	   "KVM_?",								/* 0x31 */
+	   "KVM_?",								/* 0x32 */
+	   "KVM_?",								/* 0x33 */
+	   "KVM_?",								/* 0x34 */
+	   "KVM_?",								/* 0x35 */
+	   "KVM_?",								/* 0x36 */
+	   "KVM_?",								/* 0x37 */
+	   "KVM_?",								/* 0x38 */
+	   "KVM_?",								/* 0x39 */
+	   "KVM_?",								/* 0x3a */
+	   "KVM_?",								/* 0x3b */
+	   "KVM_?",								/* 0x3c */
+	   "KVM_?",								/* 0x3d */
+	   "KVM_?",								/* 0x3e */
+	   "KVM_?",								/* 0x3f */ 
+	   "KVM_?",								/* 0x40 */
+       "KVM_CREATE_VCPU",               /* 0x41 */
+       "KVM_GET_DIRTY_LOG",               /* 0x42 */
+	   "KVM_?",								/* 0x43 */
+       "KVM_SET_NR_MMU_PAGES",               /* 0x44 */
+       "KVM_GET_NR_MMU_PAGES",               /* 0x45 */
+       "KVM_SET_USER_MEMORY_REGION",               /* 0x46 */
+       "KVM_SET_TSS_ADDR",               /* 0x47 */
+       "KVM_SET_IDENTITY_MAP_ADDR",               /* 0x48 */
+       "KVM_SET_USER_MEMORY_REGION2",               /* 0x49 */
+	   "KVM_?",								/* 0x4a */
+	   "KVM_?",								/* 0x4b */
+	   "KVM_?",								/* 0x4c */
+	   "KVM_?",								/* 0x4d */
+	   "KVM_?",								/* 0x4e */
+	   "KVM_?",								/* 0x4f */
+       "KVM_S390_UCAS_MAP",               /* 0x50 */
+       "KVM_S390_UCAS_UNMAP",               /* 0x51 */
+       "KVM_S390_VCPU_FAULT",               /* 0x52 */
+	   "KVM_?",               /* 0x53 */
+	   "KVM_?",               /* 0x54 */
+	   "KVM_?",               /* 0x55 */
+	   "KVM_?",               /* 0x56 */
+	   "KVM_?",               /* 0x57 */
+	   "KVM_?",               /* 0x58 */
+	   "KVM_?",               /* 0x59 */
+	   "KVM_?",               /* 0x5a */
+	   "KVM_?",               /* 0x5b */
+	   "KVM_?",               /* 0x5c */
+	   "KVM_?",               /* 0x5d */
+	   "KVM_?",               /* 0x5e */
+	   "KVM_?",               /* 0x5f */
+       "KVM_CREATE_IRQCHIP",               /* 0x60 */
+       "KVM_IRQ_LINE",               /* 0x61 */
+       "KVM_GET_IRQCHIP",               /* 0x62 */
+       "KVM_SET_IRQCHIP",               /* 0x63 */
+       "KVM_CREATE_PIT",               /* 0x64 */
+       "KVM_GET_PIT",               /* 0x65 */
+       "KVM_SET_PIT",               /* 0x66 */
+       "KVM_IRQ_LINE_STATUS/KVM_REGISTER_COALESCED_MMIO",               /* 0x67 */
+       "KVM_UNREGISTER_COALESCED_MMIO",               /* 0x68 */
+	   "KVM_?",               /* 0x69 */	   
+       "KVM_SET_GSI_ROUTING",               /* 0x6a */
+	   "KVM_?",               /* 0x6b */
+	   "KVM_?",               /* 0x6c */
+	   "KVM_?",               /* 0x6d */
+	   "KVM_?",               /* 0x6e */
+	   "KVM_?",               /* 0x6f */
+	   "KVM_?",               /* 0x70 */
+       "KVM_REINJECT_CONTROL",               /* 0x71 */
+	   "KVM_?",               /* 0x72 */
+	   "KVM_?",               /* 0x73 */
+	   "KVM_?",               /* 0x74 */
+	   "KVM_?",               /* 0x75 */
+       "KVM_IRQFD",               /* 0x76 */
+       "KVM_CREATE_PIT2",               /* 0x77 */
+       "KVM_SET_BOOT_CPU_ID",               /* 0x78 */
+       "KVM_IOEVENTFD",               /* 0x79 */
+       "KVM_XEN_HVM_CONFIG",               /* 0x7a */
+       "KVM_SET_CLOCK",               /* 0x7b */
+       "KVM_GET_CLOCK",               /* 0x7c */
+	   "KVM_?",               /* 0x7d */
+	   "KVM_?",               /* 0x7e */
+	   "KVM_?",               /* 0x7f */
+       "KVM_RUN",               /* 0x80 */
+       "KVM_GET_REGS",               /* 0x81 */
+       "KVM_SET_REGS",               /* 0x82 */
+       "KVM_GET_SREGS",               /* 0x83 */
+       "KVM_SET_SREGS",               /* 0x84 */
+       "KVM_TRANSLATE",               /* 0x85 */
+       "KVM_INTERRUPT",               /* 0x86 */
+	   "KVM_?",               /* 0x87 */
+       "KVM_GET_MSRS",               /* 0x88 */
+       "KVM_SET_MSRS",               /* 0x89 */
+       "KVM_SET_CPUID",               /* 0x8a */
+       "KVM_SET_SIGNAL_MASK",               /* 0x8b */
+       "KVM_GET_FPU",               /* 0x8c */
+       "KVM_SET_FPU",               /* 0x8d */
+       "KVM_GET_LAPIC",               /* 0x8e */
+       "KVM_SET_LAPIC",               /* 0x8f */
+       "KVM_SET_CPUID2",               /* 0x90 */
+       "KVM_GET_CPUID2",               /* 0x91 */
+       "KVM_TPR_ACCESS_REPORTING",               /* 0x92 */
+       "KVM_SET_VAPIC_ADDR",               /* 0x93 */
+       "KVM_S390_INTERRUPT",               /* 0x94 */
+       "KVM_S390_STORE_STATUS",               /* 0x95 */
+       "KVM_S390_SET_INITIAL_PSW",               /* 0x96 */
+       "KVM_S390_INITIAL_RESET",               /* 0x97 */
+       "KVM_GET_MP_STATE",               /* 0x98 */
+       "KVM_SET_MP_STATE",               /* 0x99 */
+       "KVM_NMI",               /* 0x9a */
+       "KVM_SET_GUEST_DEBUG",               /* 0x9b */
+       "KVM_X86_SETUP_MCE",               /* 0x9c */
+       "KVM_X86_GET_MCE_CAP_SUPPORTED",   /* 0x9d */
+       "KVM_X86_SET_MCE",               /* 0x9e */
+       "KVM_GET_VCPU_EVENTS",               /* 0x9f */
+       "KVM_SET_VCPU_EVENTS/KVM_SET_PIT2",               /* 0xa0 */
+       "KVM_GET_DEBUGREGS/KVM_PPC_GET_PVINFO",               /* 0xa1 */
+       "KVM_SET_DEBUGREGS/KVM_SET_TSC_KHZ",               /* 0xa2 */
+       "KVM_ENABLE_CAP/KVM_GET_TSC_KHZ",               /* 0xa3 */
+       "KVM_GET_XSAVE/KVM_?",               /* 0xa4 */
+       "KVM_SET_XSAVE/KVM_SIGNAL_MSI",               /* 0xa5 */
+       "KVM_GET_XCRS/KVM_PPC_GET_SMMU_INFO",               /* 0xa6 */
+       "KVM_SET_XCRS/KVM_PPC_ALLOCATE_HTAB",               /* 0xa7 */
+	   "KVM_?/KVM_CREATE_SPAPR_TCE",               /* 0xa8 */
+	   "KVM_?/KVM_ALLOCATE_RMA",               /* 0xa9 */
+       "KVM_DIRTY_TLB/KVM_PPC_GET_HTAB_FD",               /* 0xaa */
+       "KVM_GET_ONE_REG/KVM_ARM_SET_DEVICE_ADDR",               /* 0xab */
+       "KVM_SET_ONE_REG/KVM_PPC_RTAS_DEFINE_TOKEN",               /* 0xac */
+       "KVM_KVMCLOCK_CTRL/KVM_PPC_RESIZE_HPT_PREPARE",               /* 0xad */
+       "KVM_ARM_VCPU_INIT/KVM_PPC_RESIZE_HPT_COMMIT",               /* 0xae */
+       "KVM_ARM_PREFERRED_TARGET/KVM_PPC_CONFIGURE_V3_MMU",               /* 0xaf */
+       "KVM_PPC_GET_RMMU_INFO/KVM_GET_REG_LIST",               /* 0xb0 */
+       "KVM_PPC_GET_CPU_CHAR/KVM_S390_MEM_OP",               /* 0xb1 */
+       "KVM_SET_PMU_EVENT_FILTER/KVM_S390_GET_SKEYS",               /* 0xb2 */
+       "KVM_PPC_SVM_OFF/KVM_S390_SET_SKEYS",               /* 0xb3 */
+       "KVM_ARM_MTE_COPY_TAGS/KVM_S390_IRQ",               /* 0xb4 */
+       "KVM_ARM_SET_COUNTER_OFFSET/KVM_S390_SET_IRQ_STATE",               /* 0xb5 */
+       "KVM_ARM_GET_REG_WRITABLE_MASKS/KVM_S390_GET_IRQ_STATE",               /* 0xb6 */
+       "KVM_SMI",               /* 0xb7 */
+       "KVM_S390_GET_CMMA_BITS",               /* 0xb8 */
+       "KVM_S390_SET_CMMA_BITS",               /* 0xb9 */
+       "KVM_MEMORY_ENCRYPT_OP",               /* 0xba */
+       "KVM_MEMORY_ENCRYPT_REG_REGION",               /* 0xbb */
+       "KVM_MEMORY_ENCRYPT_UNREG_REGION",               /* 0xbc */
+       "KVM_HYPERV_EVENTFD",               /* 0xbd */
+       "KVM_GET_NESTED_STATE",               /* 0xbe */
+       "KVM_SET_NESTED_STATE",               /* 0xbf */
+       "KVM_CLEAR_DIRTY_LOG",               /* 0xc0 */
+       "KVM_GET_SUPPORTED_HV_CPUID",               /* 0xc1 */
+       "KVM_ARM_VCPU_FINALIZE",               /* 0xc2 */
+       "KVM_S390_NORMAL_RESET",               /* 0xc3 */
+       "KVM_S390_CLEAR_RESET",               /* 0xc4 */
+       "KVM_S390_PV_COMMAND",               /* 0xc5 */
+       "KVM_X86_SET_MSR_FILTER",               /* 0xc6 */
+       "KVM_RESET_DIRTY_RINGS",               /* 0xc7 */
+       "KVM_XEN_HVM_GET_ATTR",               /* 0xc8 */
+       "KVM_XEN_HVM_SET_ATTR",               /* 0xc9 */
+       "KVM_XEN_VCPU_GET_ATTR",               /* 0xca */
+       "KVM_XEN_VCPU_SET_ATTR",               /* 0xcb */
+	   "KVM_GET_SREGS2",               /* 0xcc */
+       "KVM_SET_SREGS2",               /* 0xcd */
+       "KVM_GET_STATS_FD",               /* 0xce */
+       "KVM_GET_XSAVE2",               /* 0xcf */
+       "KVM_S390_PV_CPU_COMMAND/KVM_XEN_HVM_EVTCHN_SEND",               /* 0xd0 */
+       "KVM_S390_ZPCI_OP",               /* 0xd1 */
+       "KVM_SET_MEMORY_ATTRIBUTES",               /* 0xd2 */
+	   "KVM_?",               /* 0xd3 */
+       "KVM_CREATE_GUEST_MEMFD"               /* 0xd4 */
+       "KVM_?"               /* 0xd5 */	   
+	   "KVM_?"               /* 0xd6 */
+	   "KVM_?"               /* 0xd7 */
+	   "KVM_?"               /* 0xd8 */
+	   "KVM_?"               /* 0xd9 */
+	   "KVM_?"               /* 0xda */
+	   "KVM_?"               /* 0xdb */
+	   "KVM_?"               /* 0xdc */
+	   "KVM_?"               /* 0xdd */
+	   "KVM_?"               /* 0xde */
+	   "KVM_?"               /* 0xdf */
+       "KVM_CREATE_DEVICE",               /* 0xe0 */
+       "KVM_SET_DEVICE_ATTR",               /* 0xe1 */
+       "KVM_GET_DEVICE_ATTR",               /* 0xe2 */
+       "KVM_HAS_DEVICE_ATTR",               /* 0xe3 */
+	   "KVM_?",               /* 0xe4 */
+	   "KVM_?",               /* 0xe5 */
+	   "KVM_?",               /* 0xe6 */
+	   "KVM_?",               /* 0xe7 */
+	   "KVM_?",               /* 0xe8 */
+	   "KVM_?",               /* 0xe9 */
+	   "KVM_?",               /* 0xea */
+	   "KVM_?",               /* 0xeb */
+	   "KVM_?",               /* 0xec */
+	   "KVM_?",               /* 0xed */
+	   "KVM_?",               /* 0xee */
+	   "KVM_?"               /* 0xef */
+};
+
+#endif
+
+char *sg_ioctl[SG_NRCTLS] = {
+          "SG_?",               /* 0x0 */
+       "SG_SET_TIMEOUT",               /* 0x01 */
+       "SG_GET_TIMEOUT",               /* 0x02 */	   
+       "SG_EMULATED_HOST",         /* 0x03 */
+       "SG_SET_TRANSFORM",          /* 0x04 */
+       "SG_GET_TRANSFORM",               /* 0x05 */
+	   "SG_?",               /* 0x06 */
+	   "SG_?",               /* 0x07 */
+	   "SG_?",               /* 0x08 */
+	   "SG_?",               /* 0x09 */
+	   "SG_?",               /* 0x0a */
+	   "SG_?",               /* 0x0b */
+	   "SG_?",               /* 0x0c */
+	   "SG_?",               /* 0x0d */
+	   "SG_?",               /* 0x0e */
+	   "SG_?",               /* 0x0f */
+	   "SG_?",               /* 0x10 */
+	   "SG_?",               /* 0x11 */
+	   "SG_?",               /* 0x12 */
+	   "SG_?",               /* 0x13 */
+	   "SG_?",               /* 0x14 */
+	   "SG_?",               /* 0x15 */
+	   "SG_?",               /* 0x16 */
+	   "SG_?",               /* 0x17 */
+	   "SG_?",               /* 0x18 */
+	   "SG_?",               /* 0x19 */
+	   "SG_?",               /* 0x1a */
+	   "SG_?",               /* 0x1b */
+	   "SG_?",               /* 0x1c */
+	   "SG_?",               /* 0x1d */
+	   "SG_?",               /* 0x1e */
+	   "SG_?",               /* 0x1f */
+	   "SG_?",               /* 0x20 */
+	   "SG_?",               /* 0x21 */
+	   "SG_?",               /* 0x22 */
+	   "SG_?",               /* 0x23 */
+	   "SG_?",               /* 0x24 */
+	   "SG_?",               /* 0x25 */
+	   "SG_?",               /* 0x26 */
+	   "SG_?",               /* 0x27 */
+	   "SG_?",               /* 0x28 */
+	   "SG_?",               /* 0x29 */
+	   "SG_?",               /* 0x2a */
+	   "SG_?",               /* 0x2b */
+	   "SG_?",               /* 0x2c */
+	   "SG_?",               /* 0x2d */
+	   "SG_?",               /* 0x2e */
+	   "SG_?",               /* 0x2f */
+	   "SG_?",               /* 0x30 */
+	   "SG_?",               /* 0x31 */
+	   "SG_?",               /* 0x32 */
+	   "SG_?",               /* 0x33 */
+	   "SG_?",               /* 0x34 */
+	   "SG_?",               /* 0x35 */
+	   "SG_?",               /* 0x36 */
+	   "SG_?",               /* 0x37 */
+	   "SG_?",               /* 0x38 */
+	   "SG_?",               /* 0x39 */
+	   "SG_?",               /* 0x3a */
+	   "SG_?",               /* 0x3b */
+	   "SG_?",               /* 0x3c */
+	   "SG_?",               /* 0x3d */
+	   "SG_?",               /* 0x3e */
+	   "SG_?",               /* 0x3f */
+	   "SG_?",               /* 0x40 */
+	   "SG_?",               /* 0x41 */
+	   "SG_?",               /* 0x42 */
+	   "SG_?",               /* 0x43 */
+	   "SG_?",               /* 0x44 */
+	   "SG_?",               /* 0x45 */
+	   "SG_?",               /* 0x46 */
+	   "SG_?",               /* 0x47 */
+	   "SG_?",               /* 0x48 */
+	   "SG_?",               /* 0x49 */
+	   "SG_?",               /* 0x4a */
+	   "SG_?",               /* 0x4b */
+	   "SG_?",               /* 0x4c */
+	   "SG_?",               /* 0x4d */
+	   "SG_?",               /* 0x4e */
+	   "SG_?",               /* 0x4f */
+	   "SG_?",               /* 0x50 */
+	   "SG_?",               /* 0x51 */
+	   "SG_?",               /* 0x52 */
+	   "SG_?",               /* 0x53 */
+	   "SG_?",               /* 0x54 */
+	   "SG_?",               /* 0x55 */
+	   "SG_?",               /* 0x56 */
+	   "SG_?",               /* 0x57 */
+	   "SG_?",               /* 0x58 */
+	   "SG_?",               /* 0x59 */
+	   "SG_?",               /* 0x5a */
+	   "SG_?",               /* 0x5b */
+	   "SG_?",               /* 0x5c */
+	   "SG_?",               /* 0x5d */
+	   "SG_?",               /* 0x5e */
+	   "SG_?",               /* 0x5f */
+	   "SG_?",               /* 0x60 */
+	   "SG_?",               /* 0x61 */
+	   "SG_?",               /* 0x62 */
+	   "SG_?",               /* 0x63 */
+	   "SG_?",               /* 0x64 */
+	   "SG_?",               /* 0x65 */
+	   "SG_?",               /* 0x66 */
+	   "SG_?",               /* 0x67 */
+	   "SG_?",               /* 0x68 */
+	   "SG_?",               /* 0x69 */
+	   "SG_?",               /* 0x6a */
+	   "SG_?",               /* 0x6b */
+	   "SG_?",               /* 0x6c */
+	   "SG_?",               /* 0x6d */
+	   "SG_?",               /* 0x6e */
+	   "SG_?",               /* 0x6f */	     
+       "SG_GET_COMMAND_Q",               /* 0x70 */
+       "SG_SET_COMMAND_Q",               /* 0x71 */
+       "SG_GET_RESERVED_SIZE",               /* 0x72 */
+	   "SG_?",               /* 0x73 */
+	   "SG_?",               /* 0x74 */
+       "SG_SET_RESERVED_SIZE",               /* 0x75 */
+       "SG_GET_SCSI_ID",                   /* 0x76  */
+	   "SG_?",               /* 0x77 */
+	   "SG_?",               /* 0x78 */
+       "SG_SET_FORCE_LOW_DMA",               /* 0x79 */
+       "SG_GET_LOW_DMA",               /* 0x7a */
+       "SG_SET_FORCE_PACK_ID",               /* 0x7b */
+       "SG_GET_PACK_ID",               /* 0x7c */
+       "SG_GET_NUM_WAITING",               /* 0x7d */
+	   "SG_SET_DEBUG",               /* 0x7e */
+       "SG_GET_SG_TABLESIZE",               /* 0x7F */
+	   "SG_?",               /* 0x80 */
+	   "SG_?",               /* 0x81 */
+       "SG_GET_VERSION_NUM",               /* 0x82 */
+       "SG_NEXT_CMD_LEN",               /* 0x83 */
+       "SG_SCSI_RESET",               /* 0x84 */
+       "SG_IO",               /* 0x85 */
+       "SG_GET_REQUEST_TABLE",               /* 0x86 */
+       "SG_SET_KEEP_ORPHAN",               /* 0x87 */
+       "SG_GET_KEEP_ORPHAN",               /* 0x88 */
+       "SG_GET_ACCESS_COUNT",               /* 0x89 */
+	   "SG_?",               /* 0x8a */
+	   "SG_?",               /* 0x8b */
+	   "SG_?",               /* 0x8c */
+	   "SG_?",               /* 0x8d */
+	   "SG_?",               /* 0x8e */
+	   "SG_?"               /* 0x8f */   
 };

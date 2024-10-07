@@ -139,6 +139,34 @@ pid_sort_by_iocnt(const void *v1, const void *v2)
 }
 
 int
+pid_sort_by_spinlock_cnt(const void *v1, void *v2)
+{
+	const uint64 *p1=v1;
+	const uint64 *p2=v2;
+	pid_info_t *a1 = (pid_info_t *)*p1;
+	pid_info_t *a2 = (pid_info_t *)*p2;
+	spinlock_info_t *spinlockp1 = a1->spinlockp;
+	spinlock_info_t *spinlockp2 = a2->spinlockp;
+	int32 num1, num2;
+	int32 diff;
+
+	if (spinlockp1 == NULL && spinlockp2 == NULL) return 0;
+	if (spinlockp1 == NULL) return 1;
+	if (spinlockp2 == NULL) return -1;
+	num1 = spinlockp1->stats.count;
+	num2 = spinlockp2->stats.count;
+	diff = num1 - num2;
+
+	if (diff < 0) {
+		return 1;
+	} else if (diff > 0) {
+		return -1;
+	} else {
+		return 0;
+	}
+}
+
+int
 pid_sort_by_miocnt(const void *v1, const void *v2)
 {
 	const uint64 *p1=v1;
@@ -730,6 +758,46 @@ slp_sort_by_count(const void *v1, const void *v2)
 }
 
 int
+wait_sort_by_time(const void *v1, const void *v2)
+{
+	const uint64 *p1=v1;
+	const uint64 *p2=v2;
+	wait_info_t *a1 = (wait_info_t *)*p1;
+	wait_info_t *a2 = (wait_info_t *)*p2;
+	int64 diff;
+
+	diff = a1->sleep_time - a2->sleep_time;
+
+	if (diff < 0) {
+		return 1;
+	} else if (diff > 0) {
+		return -1;
+	} else {
+		return 0;
+	}
+}
+
+int
+wait_sort_by_count(const void *v1, const void *v2)
+{
+	const uint64 *p1=v1;
+	const uint64 *p2=v2;
+	wait_info_t *a1 = (wait_info_t *)*p1;
+	wait_info_t *a2 = (wait_info_t *)*p2;
+	int64 diff;
+
+	diff = a1->count - a2->count;
+
+	if (diff < 0) {
+		return 1;
+	} else if (diff > 0) {
+		return -1;
+	} else {
+		return 0;
+	}
+}
+
+int
 fd_sort_by_type(const void *v1, const void *v2)
 {
 	const uint64 *p1=v1;
@@ -1098,6 +1166,26 @@ futex_gblsort_by_cnt(const void *v1, const void *v2)
         }
 }
 
+int
+ioctl_sort_by_time(const void *v1, const void *v2)
+{
+	const uint64 *p1=v1;
+	const uint64 *p2=v2;
+	ioctl_info_t *a1 = (ioctl_info_t *)*p1;
+	ioctl_info_t *a2 = (ioctl_info_t *)*p2;
+	int64 diff;
+
+	diff = a1->stats.total_time - a2->stats.total_time;
+
+	if (diff < 0) {
+		return 1;
+	} else if (diff > 0) {
+		return -1;
+	} else {
+		return 0;
+	}
+}
+
 
 int
 syscall_sort_by_time(const void *v1, const void *v2)
@@ -1142,6 +1230,26 @@ pc_sort_by_count(const void *v1, const void *v2)
 	int64 diff;
 
 	diff = a1->count - a2->count;
+
+	if (diff < 0) {
+		return 1;
+	} else if (diff > 0) {
+		return -1;
+	} else {
+		return 0;
+	}
+}
+
+int
+spin_sort_by_count(const void *v1, const void *v2)
+{
+	const uint64 *p1=v1;
+	const uint64 *p2=v2;
+	spin_info_t *a1 = (spin_info_t *)*p1;
+	spin_info_t *a2 = (spin_info_t *)*p2;
+	int64 diff;
+
+	diff = a1->stats.count - a2->stats.count;
 
 	if (diff < 0) {
 		return 1;

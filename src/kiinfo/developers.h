@@ -127,6 +127,10 @@ typedef struct trace_ids_struct {
 	int trace_mm_page_free_direct;
 	int trace_napi_poll;
 	int trace_consume_skb;
+	int trace_call_function_entry;
+	int trace_call_function_exit;
+	int trace_call_function_single_entry;
+	int trace_call_function_single_exit;
 } trace_ids_t;
 
 typedef struct ki_action {
@@ -212,7 +216,7 @@ extern void *report_func_arg;
 extern void *(*filter_func)(void *, void *);
 extern int (*preprocess_func)(void *, void *);
 extern int (*process_func)(void *, void *);
-extern int (*sort_func)(const void *, const void *);
+/* extern int (*sort_func)(const void *, const void *); */
 extern int (*print_func)(void *);
 extern int (*report_func)(void *);
 extern int (*bufmiss_func)(void *, void *);

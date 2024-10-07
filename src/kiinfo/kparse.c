@@ -68,6 +68,7 @@ kparse_winki_trace_funcs()
 	winki_enable_event(0x443, fileio_readwrite_func);
 	winki_enable_event(0x444, fileio_readwrite_func);
 	winki_enable_event(0x524, thread_cswitch_func);
+	winki_enable_event(0x529, thread_spinlock_func);
 	winki_enable_event(0x532, thread_readythread_func);
 	winki_enable_event(0x548, thread_setname_func);
 	winki_enable_event(0x60a, tcpip_sendipv4_func);
@@ -100,7 +101,6 @@ kparse_init_func(void *v)
 
 	if (debug) printf ("kparse_init_func()\n");
         process_func = NULL;
-        print_func = kparse_print_func;
         report_func = kparse_report_func;
 	filter_func = info_filter_func;   /* no filter func for kparse, use generic */
 	bufmiss_func = pid_bufmiss_func;
@@ -187,11 +187,13 @@ kparse_init_func(void *v)
         dsk_io_sizes[7]= 500;
         dsk_io_sizes[8]= 1000;
 
+	parse_dmidecode1();
 	parse_cpuinfo();
 	parse_mem_info();
 	parse_kallsyms();
 	parse_devices();
 	parse_docker_ps();
+	parse_pods();
         parse_ll_R();
 	if (is_alive) {
 		parse_cpumaps();
@@ -200,6 +202,7 @@ kparse_init_func(void *v)
 
 	if (timestamp) {
 		parse_mpsched();
+		parse_lscpu();
 		parse_proc_cgroup();
 		parse_uname(0);
         	parse_lsof();
@@ -207,6 +210,7 @@ kparse_init_func(void *v)
 		parse_edus();
 		parse_jstack();
         	parse_mpath();
+		parse_irqlist();
 	}
 }
 
@@ -439,6 +443,11 @@ kparse_print_report(void *v)
 		kp_hardirqs_by_cpu();				/* Section 1.6.2 */
 		kp_softirqs();					/* Section 1.6.3 */
 	}
+	if (globals->spinlockp) {
+		kp_spinlocks();					/* Section 1.7 */
+		kp_global_spinlocks();				/* Section 1.7.1 */
+		kp_top_pid_spinlocks();				/* Section 1.7.2 */
+	}
 
 	kp_whats_it_waiting_for();			/* Section 2.0 */
 	kp_swtch_reports();				/* Section 2.1 */
@@ -539,21 +548,6 @@ kparse_print_report(void *v)
 	kp_warnings_report();    			/* Section 10.0 */
 	globals->next_warning=0;
 	return 0;
-}
-
-int
-kparse_print_func(void *v)
-{
-        int i;
-        struct timeval tod;
-
-        if ((print_flag) && (is_alive)) {
-                gettimeofday(&tod, NULL);
-                printf ("\n%s\n", ctime(&tod.tv_sec));
-                kparse_print_report(v);
-                print_flag=0;
-        }
-        return 0;
 }
 
 int

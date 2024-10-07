@@ -158,6 +158,7 @@ runq_init_func(void *v)
         		ki_actions[TRACE_PRINT].execute = 1;
 		}
 
+		parse_dmidecode1();
 		parse_cpuinfo();
 		parse_scavuln(0);
 		if (is_alive) parse_cpumaps();
@@ -170,9 +171,11 @@ runq_init_func(void *v)
 
 		if (timestamp) {
 			parse_mpsched();
+			parse_lscpu();
 			parse_pself();
 			parse_edus();
 			parse_jstack();
+			parse_irqlist();
 
 			runq_csvfile = open_csv_file("kirunq", 1);
 		}
@@ -1378,9 +1381,9 @@ sched_print_setrq_pids(void *arg1, void *arg2)
 		coopinfop->waker_is_ICS = 1;
         } else {
         	if (pidp->cmd) pid_printf (pidfile, "  %s", pidp->cmd);
-		if (pidp->hcmd) printf ("  {%s}", pidp->hcmd);
+		if (pidp->hcmd) pid_printf (pidfile, "  {%s}", pidp->hcmd);
 		if (pidp->thread_cmd) pid_printf (pidfile, "  (%s)", pidp->thread_cmd);
-		if (pidp->dockerp) printf (HTML ? " &lt;%012llx&gt;" : " <%012llx>", ((docker_info_t *)(pidp->dockerp))->ID);
+		if (pidp->dockerp) pid_printf (pidfile, HTML ? " &lt;%012llx&gt;" : " <%012llx>", ((docker_info_t *)(pidp->dockerp))->ID);
 	        coopinfop->waker_is_ICS = 0;
         }
         PNL;
@@ -1395,6 +1398,36 @@ sched_print_setrq_pids(void *arg1, void *arg2)
 	if (is_alive)
         	setrq_infop->cnt = 0;
         return 0;
+}
+
+int
+sched_print_setrq_stktrc(void *arg1, void *arg2)
+{
+        setrq_info_t *setrq_infop = (setrq_info_t *)arg1;
+	var_arg_t *vararg = (var_arg_t *)arg2;
+	FILE *pidfile = (FILE *)vararg->arg1;
+        pid_info_t *pidp;
+        sched_info_t *schedp;
+        sched_stats_t *statp;
+
+	if (setrq_infop->win_stktrc_hash == NULL) return 0;
+
+	pidp = GET_PIDP(&globals->pid_hash, setrq_infop->PID);
+        schedp = (sched_info_t *)find_sched_info(pidp);
+        statp = &schedp->sched_stats;
+
+	pid_printf (pidfile, "%sTID: %8d", tab, pidp->PID);
+        if ((setrq_infop->PID == 0) || ((uint64)setrq_infop->PID == -1)) {
+                pid_printf (pidfile, "  %s", " ICS ");
+        } else {
+        	if (pidp->cmd) pid_printf (pidfile, "  %s", pidp->cmd);
+		if (pidp->hcmd) pid_printf (pidfile, "  {%s}", pidp->hcmd);
+		if (pidp->thread_cmd) pid_printf (pidfile, "  (%s)", pidp->thread_cmd);
+		if (pidp->dockerp) pid_printf (pidfile, HTML ? " &lt;%012llx&gt;" : " <%012llx>", ((docker_info_t *)(pidp->dockerp))->ID);
+        }
+        PNL;
+
+	foreach_hash_entry((void **)setrq_infop->win_stktrc_hash, STKTRC_HSIZE, print_stktrc_info, stktrc_sort_by_slptime, nsym, arg2);
 }
 
 int
@@ -1428,9 +1461,9 @@ print_slp_info(void *arg1, void *arg2)
 	sched_stats_t *statsp = (sched_stats_t *)vararg->arg2;
 	sched_info_t *gschedp;
 	uint64 idx, symaddr;
-	pid_info_t *pidp;
 	char *sym = NULL, *symfile = NULL;
 	vtxt_preg_t *pregp = NULL;
+	var_arg_t wait_info_args;
 
 	if (slpinfop->count == 0) return 0;
 	gschedp = globals->schedp;
@@ -1443,7 +1476,7 @@ print_slp_info(void *arg1, void *arg2)
                 }
         } else {
 		idx = slpinfop->lle.key;
-		if (idx > globals->nsyms-1) idx = UNKNOWN_SYMIDX;
+		if (idx > globals->nsyms-1) idx = UNKNOWN_KERNEL_SYMIDX;
 	}
 
 	if (gschedp && statsp == &gschedp->sched_stats) {
@@ -1454,7 +1487,7 @@ print_slp_info(void *arg1, void *arg2)
                     (slpinfop->sleep_time *100.0) / statsp->T_sleep_time,
                     MSECS(slpinfop->sleep_time / slpinfop->count),
                     MSECS(slpinfop->max_time),
-		    IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (idx == UNKNOWN_SYMIDX ? "unknown" : globals->symtable[idx].nameptr));
+		    IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (UNKNOWN_SYMIDX(idx) ? "unknown" : globals->symtable[idx].nameptr));
 	    PNL;
 	} else if (statsp != NULL) {
             pid_printf(pidfile, "%s%8d %6.2f%% %10.4f %6.2f%% %9.2f%% %10.3f %10.3f  %s", tab, 
@@ -1465,7 +1498,7 @@ print_slp_info(void *arg1, void *arg2)
 		    (slpinfop->sleep_time *100.0) / (statsp->T_sleep_time + statsp->T_runq_time + statsp->T_run_time),
                     MSECS(slpinfop->sleep_time / slpinfop->count),
                     MSECS(slpinfop->max_time),
-		    IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (idx == UNKNOWN_SYMIDX ? "unknown" : globals->symtable[idx].nameptr));
+		    IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (UNKNOWN_SYMIDX(idx) ? "unknown" : globals->symtable[idx].nameptr));
 	    PNL;
          } else {
              pid_printf(pidfile, "%s      Sleep Func                %6d          %11.6f %10.6f %10.6f  %s", tab,
@@ -1473,7 +1506,7 @@ print_slp_info(void *arg1, void *arg2)
                     SECS(slpinfop->sleep_time),
                     SECS(slpinfop->sleep_time / slpinfop->count),
                     SECS(slpinfop->max_time),
-		    IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (idx == UNKNOWN_SYMIDX ? "unknown" : globals->symtable[idx].nameptr));
+		    IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (UNKNOWN_SYMIDX(idx) ? "unknown" : globals->symtable[idx].nameptr));
 
                     if (IS_LIKI && slpinfop->scd_wpid_hash) {
                         pid_printf(pidfile, "%s       Waker %s  ",tab, tlabel);
@@ -1482,6 +1515,62 @@ print_slp_info(void *arg1, void *arg2)
                                                 print_scd_slp_info,
                                                 slp_scd_sort_by_time, 0, pidfile);
                     }
+	    PNL;
+        }
+
+	if (slpinfop->wait_hash) {
+		wait_info_args.arg1 = pidfile;
+		wait_info_args.arg2 = statsp;
+
+		foreach_hash_entry((void **)slpinfop->wait_hash, 
+					WAIT_HSIZE, 
+					print_wait_info, 
+					wait_sort_by_time, 0, &wait_info_args);
+	}
+
+	return 0;
+}
+
+int
+print_wait_info(void *arg1, void *arg2)
+{
+	wait_info_t *waitinfop = (wait_info_t *)arg1;
+	var_arg_t *vararg = (var_arg_t *)arg2;
+	FILE *pidfile = (FILE *)vararg->arg1;
+	sched_stats_t *statsp = (sched_stats_t *)vararg->arg2;
+	sched_info_t *gschedp; 
+
+	if (waitinfop->count == 0) return 0;
+	gschedp = globals->schedp;
+
+	if (gschedp && statsp == &gschedp->sched_stats) {
+            pid_printf(pidfile, "%s%8d %6.2f%% %10.4f %6.2f%% %10.3f %10.3f      %s", tab, 
+                    waitinfop->count,
+                    (waitinfop->count * 100.0) / statsp->C_sleep_cnt,
+                    SECS(waitinfop->sleep_time),
+                    (waitinfop->sleep_time *100.0) / statsp->T_sleep_time,
+                    MSECS(waitinfop->sleep_time / waitinfop->count),
+                    MSECS(waitinfop->max_time),
+		    win_thread_wait_reason[waitinfop->lle.key]);
+	    PNL;
+	} else if (statsp != NULL) {
+            pid_printf(pidfile, "%s%8d %6.2f%% %10.4f %6.2f%% %9.2f%% %10.3f %10.3f      %s", tab, 
+                    waitinfop->count,
+                    (waitinfop->count * 100.0) / statsp->C_sleep_cnt,
+                    SECS(waitinfop->sleep_time),
+                    (waitinfop->sleep_time *100.0) / statsp->T_sleep_time,
+		    (waitinfop->sleep_time *100.0) / (statsp->T_sleep_time + statsp->T_runq_time + statsp->T_run_time),
+                    MSECS(waitinfop->sleep_time / waitinfop->count),
+                    MSECS(waitinfop->max_time),
+		    win_thread_wait_reason[waitinfop->lle.key]);
+	    PNL;
+         } else {
+             pid_printf(pidfile, "%s        %-23s %6d          %11.6f %10.6f %10.6f", tab,
+		    win_thread_wait_reason[waitinfop->lle.key],
+                    waitinfop->count,
+                    SECS(waitinfop->sleep_time),
+                    SECS(waitinfop->sleep_time / waitinfop->count),
+                    SECS(waitinfop->max_time));
 	    PNL;
         }
 
@@ -1509,7 +1598,7 @@ print_slp_info_csv(void *arg1, void *arg2)
                 }
         } else {
                 idx = slpinfop->lle.key;
-                if (idx > globals->nsyms-1) idx = UNKNOWN_SYMIDX;
+                if (idx > globals->nsyms-1) idx = UNKNOWN_KERNEL_SYMIDX;
         }
 
 	csv_printf (wait_csvfile,"%lld,%s,%d,%7.6f,%s", 
@@ -1517,7 +1606,7 @@ print_slp_info_csv(void *arg1, void *arg2)
 		pidp->cmd,
 		statsp->C_sleep_cnt,
 		SECS(statsp->T_sleep_time),
-		IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (idx == UNKNOWN_SYMIDX ? "unknown" : globals->symtable[idx].nameptr));
+		IS_WINKI ? (sym ? sym : (symfile ? symfile : "unknown")) : (UNKNOWN_SYMIDX(idx) ? "unknown" : globals->symtable[idx].nameptr));
 
 	csv_printf (wait_csvfile,",%d,%3.2f,%7.6f,%3.2f,%3.2f,%7.6f,%7.6f\n", 
 		slpinfop->count,
@@ -1623,7 +1712,7 @@ print_stktrc_info(void *arg1, void *arg2)
 				} else {
 					pid_printf (pidfile, "  %p", globals->symtable[key].addr);
 				}
-			} else if (key == UNKNOWN_SYMIDX) {
+			} else if (UNKNOWN_SYMIDX(key)) {
 				pid_printf (pidfile, "  unknown");
 	        	} else if (stktrcp->pidp) {
                         	pidp = stktrcp->pidp;
@@ -1753,7 +1842,7 @@ wait_scallsym_json(void *arg1, void *arg2)
         if (slpinfop->count == 0) return 0;
 
         idx = slpinfop->lle.key;
-	if (idx > globals->nsyms-1) idx = UNKNOWN_SYMIDX;
+	if (idx > globals->nsyms-1) idx = UNKNOWN_KERNEL_SYMIDX;
 
         /*
         ** symbol names from /proc have embedded tabs that have to
@@ -1762,7 +1851,7 @@ wait_scallsym_json(void *arg1, void *arg2)
 
         bzero(json_detail, 8192);
 
-        if (idx != UNKNOWN_SYMIDX) {
+        if (!UNKNOWN_SYMIDX(idx)) {
                 symb_p = strdup(globals->symtable[idx].nameptr);
                 if (c_p = strstr(symb_p, "\t"))
                     *c_p = 0x20;
@@ -1776,10 +1865,10 @@ wait_scallsym_json(void *arg1, void *arg2)
                     (slpinfop->sleep_time *100.0) / (statsp->T_sleep_time + statsp->T_runq_time + statsp->T_run_time),
                     MSECS((slpinfop->sleep_time*1.0) / slpinfop->count),
                     MSECS(slpinfop->max_time*1.0),
-                    idx == UNKNOWN_SYMIDX ? "unknown" : symb_p);
+                    UNKNOWN_SYMIDX(idx) ? "unknown" : symb_p);
             strcat(json_detail,json_temp);
         }
-        START_OBJ_PRINT((idx == UNKNOWN_SYMIDX ? "unknown" : symb_p), SECS(slpinfop->sleep_time), slpinfop->count, JSWAITING, json_detail, "");
+        START_OBJ_PRINT((UNKNOWN_SYMIDX(idx) ? "unknown" : symb_p), SECS(slpinfop->sleep_time), slpinfop->count, JSWAITING, json_detail, "");
 
         if (symb_p)
         	FREE(symb_p);
@@ -1818,14 +1907,14 @@ print_slp_info_json(void *arg1, void *arg2)
         if (slpinfop->count == 0) return 0;
 
         idx = slpinfop->lle.key;
-	if (idx > globals->nsyms-1) idx = UNKNOWN_SYMIDX;
+	if (idx > globals->nsyms-1) idx = UNKNOWN_KERNEL_SYMIDX;
 
         /*
         ** symbol names from /proc have embedded tabs that have to
         ** be stripped out....usually only one per string in front of the module name
         */
 
-        if (!(idx == UNKNOWN_SYMIDX)) {
+        if (!UNKNOWN_SYMIDX(idx)) {
                 symb_p = strdup(globals->symtable[idx].nameptr);
                 if (c_p = strstr(symb_p, "\t"))
                     *c_p = 0x20;
@@ -1839,9 +1928,10 @@ print_slp_info_json(void *arg1, void *arg2)
                     (slpinfop->sleep_time *100.0) / (statsp->T_sleep_time + statsp->T_runq_time + statsp->T_run_time),
                     MSECS((slpinfop->sleep_time*1.0) / slpinfop->count),
                     MSECS(slpinfop->max_time*1.0),
-                    idx == UNKNOWN_SYMIDX ? "unknown" : symb_p);
+                    UNKNOWN_SYMIDX(idx) ? "unknown" : symb_p);
             strcat(json_detail,json_temp);
         }
+
         if (symb_p)
                 FREE(symb_p);
         return 0;
@@ -2229,7 +2319,11 @@ pid_json_print_summary(FILE *pid_jsonfile, pid_info_t *pidp, sched_stats_t *stat
                 else sprintf (json_temp, "  (%s)", pidp->thread_cmd);
                 strcat(json_detail,json_temp);
         }
-	if (pidp->dockerp) sprintf (json_temp, HTML ? " &lt;%012llx&gt;" : " <%012llx>", ((docker_info_t *)(pidp->dockerp))->ID);
+	if (pidp->dockerp) { 
+		sprintf (json_temp, HTML ? " &lt;%012llx&gt;" : " <%012llx>", ((docker_info_t *)(pidp->dockerp))->ID);
+        	strcat(json_detail,json_temp);
+	}
+
         sprintf (json_temp, "\\n");
         strcat(json_detail,json_temp);
 
@@ -2464,6 +2558,7 @@ sched_report(void *arg1, FILE *pidfile, FILE *pid_jsonfile, FILE *pid_wtree_json
         char detail[8192];
         char json_pidname[128];
 	var_arg_t vararg;
+	print_stktrc_args_t print_stktrc_args;
 
         coop_info_t coopinfo;
         if ((schedp == NULL) || (schedp && (schedp->cpu == -1))) {
@@ -2606,7 +2701,7 @@ sched_report(void *arg1, FILE *pidfile, FILE *pid_jsonfile, FILE *pid_wtree_json
 			vararg.arg1 = pidfile;
 			vararg.arg2 = &coopinfo;
                         foreach_hash_entry((void **)schedp->setrq_tgt_hash, WPID_HSIZE,
-                                        sched_print_setrq_pids, setrq_sort_by_sleep_time, npid, (void *)&vararg);
+                                        sched_print_setrq_pids, setrq_sort_by_cnt, npid, (void *)&vararg);
                 } else {
                         pid_printf (pidfile, "%s    None\n", tab);
                 }
@@ -2629,10 +2724,30 @@ sched_report(void *arg1, FILE *pidfile, FILE *pid_jsonfile, FILE *pid_wtree_json
 			vararg.arg1 = pidfile;
 			vararg.arg2 = &coopinfo;
                         foreach_hash_entry((void **)schedp->setrq_src_hash, WPID_HSIZE,
-                                        sched_print_setrq_pids, setrq_sort_by_sleep_time, npid, (void *)&vararg);
+				sched_print_setrq_pids, setrq_sort_by_sleep_time, npid, (void *)&vararg);
                 } else {
                         pid_printf (pidfile, "%s    None\n", tab);
                 }
+
+		/* Print ReadyThread stack traces for Top threads what wokeup this task
+		   for WinKI traces, this helps identify what the thread was waiting on */
+
+		if (IS_WINKI) {
+			PNL;
+			pid_printf(pidfile, "%sReadyThread Stack Traces of top threads waking this thread", tab); PNL
+        		pid_printf(pidfile, "%s   count%s  Stack trace", tab, schedp ? "    wpct      avg " : " "); PNL;
+			pid_printf(pidfile, "%s              %%     msecs", tab); PNL;
+			pid_printf(pidfile, "%s===============================================================",tab); PNL;
+
+			print_stktrc_args.schedp = schedp;
+			print_stktrc_args.pidp = pidp;
+			print_stktrc_args.warnflag = 0;
+
+			vararg.arg1 = pidfile;
+			vararg.arg2 = &print_stktrc_args;
+                        foreach_hash_entry((void **)schedp->setrq_src_hash, WPID_HSIZE,
+				sched_print_setrq_stktrc, setrq_sort_by_sleep_time, npid, &vararg);
+		}
         }
 
         if (pidp->slp_hash) {
@@ -2673,6 +2788,15 @@ print_cstate_stats(uint64 *warnflagp)
 		BOLD("   Cstate%d", j);
 	}
 	BOLD (" freq_changes    freq_hi   freq_low"); NL;
+
+	if (cstate_names) {
+		BOLD("                             ");
+		for (j=0; j<=max_cstate; j++) {
+			if (cstates[j].name) BOLD("%10s", cstates[j].name);
+			else if (j==0) BOLD("%10s", "POLL"); 
+			else BOLD("%10s", " ");
+		}; NL;
+	}
 
 	for (i=0;i<MAXCPUS;i++) {
 		if (cpuinfop = FIND_CPUP(globals->cpu_hash, i)) {
@@ -2843,7 +2967,6 @@ print_pid_runtime_summary(void *arg1, void *arg2)
 	pid_info_t *pidp = arg1;
 	sched_info_t *schedp;
 	sched_stats_t *statp;
-	uint64 *warnflagp = (uint64 *)arg2;
 
 	if (pidp->PID == 0ull) return 0;
 	if ((schedp = pidp->schedp) == NULL) return 0;
@@ -2870,6 +2993,60 @@ print_pid_runtime_summary(void *arg1, void *arg2)
 	}
 
         if (cluster_flag && dockfile == NULL) { SPACE; SERVER_URL_FIELD_BRACKETS(globals) }
+
+	DNL;
+
+        return 0;
+
+}
+
+int
+print_pid_runqtime_summary(void *arg1, void *arg2)
+{
+	pid_info_t *pidp = arg1;
+	sched_info_t *schedp;
+	sched_stats_t *statp;
+	runq_info_t *rqinfop;
+	uint64 *warnflagp = (uint64 *)arg2;
+	char runq_delay = 0;
+
+	if (pidp->PID == 0ull) return 0;
+	if ((schedp = pidp->schedp) == NULL) return 0;
+	statp = &schedp->sched_stats;
+
+	rqinfop = schedp->rqinfop;
+	if (warnflagp && rqinfop && (SECS(rqinfop->max_time*1000.0) > 0.1)) {
+		runq_delay = 1;
+		RED_FONT;
+		(*warnflagp) |= WARNF_RUNQ_DELAYS;
+	}
+
+	if (dockfile) {
+		dock_printf ("%-8d", pidp->PID);
+	} else {
+		PID_URL_FIELD8(pidp->PID);
+	}
+
+        dock_printf (" %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f", 
+                SECS(statp->T_run_time),
+                SECS(statp->T_sys_time),
+                SECS(statp->T_user_time),
+                SECS(statp->T_runq_time),
+                SECS(statp->T_sleep_time),
+		rqinfop ? SECS(rqinfop->max_time*1000.0) : 0.0);
+
+	if (pidp->cmd) dock_printf ("  %s", (char *)pidp->cmd);
+	if (pidp->hcmd) dock_printf ("  {%s}", pidp->hcmd);
+	if (pidp->thread_cmd) dock_printf (" (%s)", pidp->thread_cmd);
+	if (pidp->dockerp && (dockfile == NULL)) {
+		printf (HTML ? " &lt;%012llx&gt;" : " <%012llx>", ((docker_info_t *)(pidp->dockerp))->ID);
+	}
+
+        if (cluster_flag && dockfile == NULL) { SPACE; SERVER_URL_FIELD_BRACKETS(globals) }
+
+	if (runq_delay) {
+		BLACK_FONT;
+	} 
 
 	DNL;
 
@@ -2917,7 +3094,7 @@ print_systime_pids(uint64 *warnflagp)
 	foreach_hash_entry((void **)globals->pid_hash, PID_HASHSZ,
                            (int (*)(void *, void *))print_pid_runtime_summary,
                            (int (*)()) pid_sort_by_systime,
-                           npid, warnflagp);
+                           npid, NULL);
 }
 
 int
@@ -2927,15 +3104,16 @@ print_runtime_pids(uint64 *warnflagp)
 	foreach_hash_entry((void **)globals->pid_hash, PID_HASHSZ,
                            (int (*)(void *, void *))print_pid_runtime_summary,
                            (int (*)()) pid_sort_by_runtime,
-                           npid, warnflagp);
+                           npid, NULL);
 }
 
 int 
 print_runq_pids(uint64 *warnflagp)
 {
-	BOLD ("    %s       RunTime      SysTime     UserTime     RunqTime    SleepTime  Command", tlabel); NL;
+	BOLD ("    %s       RunTime      SysTime     UserTime     RunqTime    SleepTime      MaxRqTm   Command", tlabel); NL; 
+
 	foreach_hash_entry((void **)globals->pid_hash, PID_HASHSZ,
-                           (int (*)(void *, void *))print_pid_runtime_summary,
+                           (int (*)(void *, void *))print_pid_runqtime_summary,
                            (int (*)()) pid_sort_by_runqtime,
                            npid, warnflagp);
 }
@@ -3191,21 +3369,6 @@ runq_print_report(void *v)
 
 	return 0;
 } 
-
-int
-runq_print_func(void *v)
-{
-	struct timeval tod;
-	if (debug) printf ("runq_print_func()\n");
-
-	if ((print_flag) && (is_alive)) {
-		gettimeofday(&tod, NULL);
-		printf ("\n%s\n", ctime(&tod.tv_sec));
-		runq_print_report(v);
-		print_flag = 0;
-	}
-	return 0;
-}
 
 int
 runq_ftrace_print_func(void *a, void *arg)

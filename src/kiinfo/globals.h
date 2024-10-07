@@ -163,6 +163,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define MSR_FLAG		0x2000000000000ull
 #define DOCKTREE_FLAG		0x4000000000000ull
 #define ETLDUMP_FLAG		0x8000000000000ull
+#define SYSCONFIG_FLAG		0x10000000000000ull
 
 #define SET_STAT(flag) (kiinfo_stats |= flag)
 #define CLEAR_STAT(flag) (kiinfo_stats &= ~flag)
@@ -234,6 +235,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define	kiall_flag		(ISSET(KIALL_FLAG))
 #define mangle_flag		(ISSET(MANGLE_FLAG))
 #define info_flag		(ISSET(INFO_FLAG))
+#define sysconfig_flag		(ISSET(SYSCONFIG_FLAG))
 #define kitrace_flag		(ISSET(KITRACE_FLAG))
 #define filter_flag		(ISSET(FILTER_FLAG))
 #define msr_flag		(ISSET(MSR_FLAG))
@@ -271,7 +273,9 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define TMP_SASIZE 50
 #define PID_SASIZE 1000
 #define IS_ERR_VALUE(x)  ((signed long)x >= -4095 && (signed long)x < 0)
-#define UNKNOWN_SYMIDX 0xffffffffffffffffull
+#define UNKNOWN_SYMIDX(key) (key==UNKNOWN_USER_SYMIDX || key==UNKNOWN_KERNEL_SYMIDX)
+#define UNKNOWN_USER_SYMIDX   0xffffffffffffffffull
+#define UNKNOWN_KERNEL_SYMIDX 0xfffffffffffffffeull
 #define DUMMY_SYSCALL 9999
 
 #define MAX_MAJORS      256
@@ -425,6 +429,24 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define GFP_NRBIT	32  
 #define IRQ_NRBIT	16
 
+#define UVM_IOCTL_MAGIC		0
+#define UVM_NRCTLS		0x50
+
+#define DRM_IOCTL_MAGIC		'd'
+#define DRM_NRCTLS		0xd0
+
+#define NVIDIA_IOCTL_MAGIC	'F'
+#define NVIDIA_NRCTLS		0xe0
+
+#define DM_IOCTL_MAGIC		0xfd
+#define DM_NRCTLS		0x20
+
+#define SG_IOCTL_MAGIC          0x22
+#define SG_NRCTLS               0x90
+
+#define KVM_IOCTL_MAGIC          0xae
+#define KVM_NRCTLS               0xef
+
 /* special node numbers for sockets */
 #define TCP_NODE	1
 #define UDP_NODE	2
@@ -471,7 +493,8 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define WrRundown		36
 #define WrAlertThreadId		37
 #define WrDeferredPreempt	38
-#define MaxThreadWaitReasons	39
+#define UnknownReason		39
+#define MaxThreadWaitReasons	40	
 
 /* Thread States */
 #define Initialized		0
@@ -501,6 +524,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define GET_ADD_IRQINFOP(addr)  (irq_info_t *)find_add_info((void **)addr, sizeof(irq_info_t))
 #define GET_ADD_SCALL_STATSP(addr) (syscall_stats_t *)find_add_info((void **)addr, sizeof(syscall_stats_t))
 #define GET_IOV_STATSP(addr)	(iov_stats_t *)find_add_info((void **)addr, sizeof(iov_stats_t))
+#define GET_SPINLOCKP(addr)  (spinlock_info_t *)find_add_info((void **)addr, sizeof(spinlock_info_t))
 
 #define GET_DOCKERP(hashp, key) (docker_info_t *)find_add_hash_entry((lle_t ***)hashp, DOCKER_HASHSZ, key, DOCKER_HASH(key), sizeof(docker_info_t))
 #define GET_DKPIDP(hashp, key)	(dkpid_info_t *)find_add_hash_entry((lle_t ***)hashp, PID_HASHSZ, key, PID_HASH(key), sizeof(dkpid_info_t))
@@ -517,12 +541,18 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define GET_FDINFOP(hashp, key)  (fd_info_t *)find_add_hash_entry((lle_t ***)hashp, FD_HSIZE, key, FD_HASH(key), sizeof(fd_info_t))
 #define GET_FDEVP(hashp, key)  (filedev_t *)find_add_hash_entry((lle_t ***)hashp, FDEV_HSIZE, key, FDEV_HASH(key), sizeof(filedev_t))
 #define GET_FOBJP(hashp, key)  (fileobj_t *)find_add_hash_entry((lle_t ***)hashp, FOBJ_HSIZE, key, FOBJ_HASH(key), sizeof(fileobj_t))
+#define GET_SPININFOP(hashp, key)  (spin_info_t *)find_add_hash_entry((lle_t ***)hashp, SPIN_HSIZE, key, SPIN_HASH(key), sizeof(spin_info_t))
 #define GET_SYSCALLP(hashp, key)  (syscall_info_t *)find_add_hash_entry((lle_t ***)hashp, SYSCALL_HASHSZ, key, SYSCALL_HASH(key), sizeof(syscall_info_t))
 #define GET_ADDR_TO_IDX_HASH_ENTRYP(hashp, key)  (addr_to_idx_hash_entry_t *)find_add_hash_entry((lle_t ***)hashp, ADDR_TO_IDX_HASHSZ, key, ADDR_TO_IDX_HASH(key), sizeof(addr_to_idx_hash_entry_t))
 #define GET_SCDWINFOP(hashp, key)  (scd_waker_info_t *)find_add_hash_entry((lle_t ***)hashp, WPID_HSIZE, key, WPID_HASH(key), sizeof(scd_waker_info_t))
 #define GET_SLPINFOP(hashp, key)  (slp_info_t *)find_add_hash_entry((lle_t ***)hashp, SLP_HSIZE, key, SLP_HASH(key), sizeof(slp_info_t))
+#define GET_WAITINFOP(hashp, key)  (wait_info_t *)find_add_hash_entry((lle_t ***)hashp, WAIT_HSIZE, key, WAIT_HASH(key), sizeof(wait_info_t))
+#define GET_RQINFOP(hashp, key)  (runq_info_t *)find_add_hash_entry((lle_t ***)hashp, CPU_HASHSZ, key, CPU_HASH(key), sizeof(runq_info_t))
 #define GET_RQINFOP(hashp, key)  (runq_info_t *)find_add_hash_entry((lle_t ***)hashp, CPU_HASHSZ, key, CPU_HASH(key), sizeof(runq_info_t))
 #define GET_SETRQP(hashp, key)  (setrq_info_t *)find_add_hash_entry((lle_t ***)hashp, WPID_HSIZE, key, WPID_HASH(key), sizeof(setrq_info_t))
+#define GET_NTSTATUS(hashp, key)   (ntstatus_info_t *)find_add_hash_entry((lle_t ***)hashp, NTSTATUS_HASHSZ, key, NTSTATUS_HASH(key), sizeof(ntstatus_info_t))
+#define GET_IOCTLP(hashp, key)   (ioctl_info_t *)find_add_hash_entry((lle_t ***)hashp, IOCTL_HASHSZ, key, IOCTL_HASH(key), sizeof(ioctl_info_t))
+
 #define GET_PGCACHEP(hashp, dev, node) (pgcache_t *)find_add_hash_entry((lle_t ***)hashp, PGCACHE_HASHSZ, PGCACHE_KEY(dev,node),		\
 								PGCACHE_HASH(dev, node), sizeof(pgcache_t))
 #define GET_FDATAP(hashp, dev, node) (fdata_info_t *)find_add_hash_entry((lle_t ***)hashp, 							\
@@ -571,6 +601,8 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 								SDATA_HASH(ip1, port1, ip2, port2), sizeof(clsdata_info_t))
 
 #define FIND_DOCKERP(hash, key) (docker_info_t *)find_entry((lle_t **)hash, key, DOCKER_HASH(key))
+#define FIND_NTSTATUS(hash, key)  (ntstatus_info_t *)find_entry((lle_t **)hash, key, NTSTATUS_HASH(key))
+#define FIND_IOCTL(hash, key)  (ioctl_info_t *)find_entry((lle_t **)hash, key, IOCTL_HASH(key))
 #define FIND_PIDP(hash, key)  (pid_info_t *)find_entry((lle_t **)hash, key, PID_HASH(key))
 #define FIND_CPUP(hash, key)  (cpu_info_t *)find_entry((lle_t **)hash, key, CPU_HASH(key))
 #define FIND_PCPUP(hash, key)  (pcpu_info_t *)find_entry((lle_t **)hash, key, CPU_HASH(key))
@@ -618,10 +650,10 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define FIND_REQP(hash, key) (futex_reque_t *)find_entry((lle_t **)hash, key, FUTEX_HASH(key))
 #define FUTEX_KEY(tgid, uaddr) ((uaddr & 0xffffffffff) | ((uint64)tgid << 40))
 #define FUTEX_TGID(key) ((key & 0xffffff0000000000) >> 40)
-#define FUTEX_HSIZE 0x400
-#define FUTEX_HASH(key)  ((key & (key >> 32)) % FUTEX_HSIZE)
+#define FUTEX_HSIZE 0x1000
+#define FUTEX_HASH(key)  (((key >> 16) + (key >> 40)) % FUTEX_HSIZE)
 #define GFUTEX_HSIZE 0x4000
-#define GFUTEX_HASH(key)  ((key & (key >> 32)) % GFUTEX_HSIZE)
+#define GFUTEX_HASH(key)  (((key >> 16) + (key >> 40)) % GFUTEX_HSIZE)
 #define FUTEXOP_HSIZE 0x8
 #define FUTEXOP_HASH(key) (key %  FUTEXOP_HSIZE)
 #define FUTEXPID_HSIZE 0x40
@@ -629,7 +661,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define FUTEXRET_HSIZE 0x10 
 #define FUTEXRET_HASH(key) ((key & 0xff) %  FUTEXRET_HSIZE)
 
-#define CLFUTEX_HASHSZ 0x100
+#define CLFUTEX_HASHSZ 0x400
 #define CLFUTEX_HASH(server, addr)  ((server+addr) % CLFUTEX_HASHSZ)
 #define CLFUTEX_KEY(server, addr)  ((uint64) server << 48 | addr & 0xffffffffffffull)
 #define CLFUTEX_ADDR(key) (key & 0xffffffffffffull)
@@ -667,6 +699,9 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define SLP_HSIZE 0x20
 #define SLP_HASH(key)  ((key >> 9) & (SLP_HSIZE-1))
 
+#define WAIT_HSIZE 0x20
+#define WAIT_HASH(key)  (SLP_HSIZE-1)
+
 #define PDB_HSIZE 0x400
 #define PDB_HASH(key) (key & (PDB_HSIZE-1))
 
@@ -680,6 +715,10 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define FOBJ lle.key
 #define FOBJ_HSIZE 0x1000
 #define FOBJ_HASH(fobj) ((fobj << 10) & (FOBJ_HSIZE-1))
+
+#define CALLER_ADDR lle.key
+#define SPIN_HSIZE 0x100
+#define SPIN_HASH(fobj) ((fobj >> 6) & (SPIN_HSIZE-1))
 
 #define FDEV lle.key
 #define FDEV_HSIZE 0x20
@@ -759,6 +798,12 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 #define CPU_HASHSZ 0x200
 #define CPU_HASH(cpu) ((cpu) % CPU_HASHSZ)
+
+#define NTSTATUS_HASHSZ 0x4000
+#define NTSTATUS_HASH(status) ((((status & 0xc0000000) >> 18) + (status & 0xffff) + ((status & 0x7f0000) >> 9)) % NTSTATUS_HASHSZ)
+
+#define IOCTL_HASHSZ 0x10
+#define IOCTL_HASH(cmd) ((cmd) % IOCTL_HASHSZ)
 
 #define LDOM_HASHSZ 0x10
 #define LDOM_HASH(ldom) ((ldom) % LDOM_HASHSZ)
@@ -927,14 +972,15 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define IPC_CALL	14
 #define FUTEX_VAL3	15
 #define SEMCTL_CMD	16
-#define MAXARG_ACTIONS 	17
+#define IOCTL_REQ	17
+#define MAXARG_ACTIONS 	18
 
 #define NUM_RQHIST_BUCKETS 10
 #define MAX_RQHIST_PROCS   256
 
 /* macros for managing the Notes and Warnings messages and links.  */
 /* update with warnmsg[] definitions in globals.c */
-#define MAXWARNMSG		33	
+#define MAXWARNMSG		36
 #define MAXNOTEMSG		0
 #define MAXNOTEWARN		MAXWARNMSG+MAXNOTEMSG
 #define WARN_CPU_BOTTLENECK		0		
@@ -970,6 +1016,9 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define WARN_CACHE_BYPASS		30
 #define WARN_MEM_IMBALANCE		31
 #define WARN_NODE_LOWMEM		32
+#define WARN_RUNQ_DELAYS		33
+#define WARN_LARGE_NUMA_NODE		34
+#define WARN_CLOCKSOURCE		35
 #define NOTE_NUM1		MAXWARNMSG+0
 
 /* warn flags passed to "foreach" functions for detection */
@@ -996,6 +1045,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define WARNF_CACHE_BYPASS		0x100000ull
 #define WARNF_MEM_IMBALANCE		0x200000ull
 #define WARNF_NODE_LOWMEM		0x400000ull
+#define WARNF_RUNQ_DELAYS		0x800000ull
 
 /* warn flags specific to hardclocks warnflag */ 
 #define WARNF_SEMLOCK			0x1ull
@@ -1005,6 +1055,7 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #define WARNF_PCC_CPUFREQ		0x10ull
 #define WARNF_KVM_PAGEFAULT		0x20ull
 #define WARNF_ORACLE_COLSTATS		0x40ull
+#define WARNF_LARGE_NUMA_NODE		0x80ull
 
 /* warn flags specific to Windows */
 #define WARNF_TCPTIMEOUTS		0x01ull 
@@ -1224,6 +1275,23 @@ typedef struct hc_info {
 	uint32		cpustate[HC_STATES];
 } hc_info_t;
 
+typedef struct spin_stats {
+	uint64		waitcycles;
+	uint64		heldcycles;
+	uint64		spincnt;
+	int		count;
+} spin_stats_t;
+
+typedef struct spin_info {
+	lle_t		lle;
+	spin_stats_t	stats;
+} spin_info_t;
+
+typedef struct spinlock_info {
+	void		**spin_hash;
+	spin_stats_t	stats;
+} spinlock_info_t;
+
 typedef struct syscall_arg {
 	char *label;
 	int	format;
@@ -1332,12 +1400,6 @@ typedef struct lviostats {
 	uint64		max_time;
 } lviostats_t;
 
-typedef struct wait_info {
-	uint64 		sleep_time;
-	uint64		max_time;
-	uint32     		count;
-} wait_info_t;
-
 /* the first part of fd_stats must the the same as sd_stats */
 struct fd_stats {
 	uint64          total_time;
@@ -1381,6 +1443,7 @@ typedef struct pid_info {
 	void		*dockerp;	/* docker pointer */
 	void *schedp;			/* struct sched_info */
 	hc_info_t *hcinfop;		/* struct hc_info */
+	void *spinlockp;		/* struct spinlock_info_t  WINDOWS ONLY */
 	void **devhash;			/* struct dev_info */
 	void **mdevhash;		/* struct dev_info */
 	void **scallhash;		/* struct syscallinfo */
@@ -1416,7 +1479,7 @@ typedef struct pid_info {
 	/* information saved on sched_switch when going to SLEEP */
 	uint64		last_stack_depth;
 	uint64		last_stktrc[LEGACY_STACK_DEPTH];	
-	uint64 		last_sleep_delta;		/* needed for WinKI */
+	uint64 		last_sleep_delta;		/* needed for WinKI, time between sleep and RunQ */
 
 	/* global pid information */
 	uint32		syscall_cnt;
@@ -1505,8 +1568,17 @@ typedef struct slp_info {
 	uint64 			sleep_time;
 	uint64			max_time;
         void                    **scd_wpid_hash;    /* hashed list of tids waking us up from this kernel func.  Used in the scdetail kipid option */
+	void			**wait_hash;
 	int     		count;
 } slp_info_t;
+
+typedef struct wait_info {
+	lle_t   	lle;			/* key = base addr of kernel function  */
+	uint64 		sleep_time;
+	uint64		max_time;
+	uint32		count;
+} wait_info_t;
+
 
 #define LLC_REF		0
 #define LLC_MISSES	1
@@ -1600,6 +1672,9 @@ typedef struct sched_stats {
 	unsigned long	msr_total[MSR_NREGS];
 	int		cnt[N_CNT_STATS];
 	int     	state;   		/* UNKNOWN, RUNNING, ON_RUNQ, SLEEPING */
+	int		LastWaitReason;		/* Windows Wait Reason */
+	int		LastWaitTime;		/* Windows Wait Time */
+
 } sched_stats_t;
 
 /* For coop tracking we map the interaction using:
@@ -1662,6 +1737,7 @@ typedef struct wtree_node {
 typedef struct setrq_info {
         lle_t           lle;            /* key is pid */
         struct coop_scall    **coop_scall_hash;   /* syscalls waker/sleeper were in when woken */
+	stktrc_info_t	**win_stktrc_hash;	/* for Windows ReadyThread events */
         uint64          sleep_time;
         uint64          unknown_time;
         int             cnt;
@@ -1759,6 +1835,11 @@ typedef struct idle_info {
 	uint32 prev_time;
 } idle_info_t;
 
+typedef struct ntstatus_info {
+	lle_t		lle;
+	char		*name;
+} ntstatus_info_t;
+
 typedef struct pcpu_info {
 	lle_t		lle;
 	int	lcpu1;
@@ -1774,6 +1855,12 @@ typedef struct pcpu_info {
 	uint64 pset_DBDI_hist[IDLE_TIME_NBUCKETS];
 	uint64 ldom_DBDI_hist[IDLE_TIME_NBUCKETS];
 } pcpu_info_t;
+
+typedef struct cstate_info {
+	int cstate;
+	char *name;
+	int latency;
+} cstate_info_t;
 
 typedef struct power_info {
 	uint64	freq_hi;
@@ -2016,12 +2103,18 @@ struct logio_info {
 	struct logio_stats 	stats;
 };
 
+typedef struct ioctl_info {		/* lle is ioctl arg0 */
+	lle_t		lle;
+	struct syscall_stats 	stats;
+} ioctl_info_t;
+
 struct syscall_info {
 	lle_t			lle;
 	struct syscall_stats	stats;
 	struct sched_stats	sched_stats;
 	void			**slp_hash;
 	struct iov_stats	*iov_stats;
+	struct ioctl_info	**ioctl_hash;
 };
 
 struct win_syscall_save_entry {
@@ -2176,6 +2269,7 @@ typedef struct server_info {
 	char *hostname;
 	char *os_vers;
 	char *model;
+	char *product;
 	pid_info_t **pid_hash;		/* perpid information */
 	cpu_info_t **cpu_hash;		/* per-lcpu information */
 	pcpu_info_t **pcpu_hash;	/* per-pcpu information */
@@ -2189,7 +2283,7 @@ typedef struct server_info {
 	void **stktrc_hash;		/* struct stktrc_info */
 	void **syscall_hash;		/* struct syscall_info */
 	void **fdata_hash;		/* struct fdata_info_t */
-	void **fobj_hash;		/* struct fileobj_t   WINDOWS only */
+	void **fobj_hash;		/* struct fileobj_t   WINDOWS ONLY */
 	void **sdata_hash;		/* struct sdata_info_t */
 	void **ipip_hash;		/* struct ipip_info_t */
 	void **rip_hash;		/* struct ip_info_t */
@@ -2203,6 +2297,7 @@ typedef struct server_info {
 	void *iotimes;			/* struct iotimes */
 	void **elfmap_hash;		/* struct elfmap_info_t */
 	void **pdbmap_hash;   		/* Windows PDB Hash Table */
+	void **ntstatus_hash;		/* Windows NTSTATUS Hash Table */
 	void *vtxt_pregp;
 	struct iostats	iostats[3];     /* TOTAL=0/READ=1/WRITE=2 */
 	struct sd_stats netstats;	/* network stats */
@@ -2212,6 +2307,7 @@ typedef struct server_info {
 	void **ctx_hash;		/* struct ctx_info_t */
 	void **win_syscall_hash;	/* struct addr_to_idx_hash_entry_t */
 	void **win_dpc_hash;		/* struct addr_to_idx_hash_entry_t */
+	void *spinlockp;		/* struct spinlock_info_t  WINDOWS ONLY */
 	short *syscall_index_32;
 	short *syscall_index_64;
 	/* for optional irq processing */
@@ -2253,9 +2349,13 @@ typedef struct server_info {
 	int missed_events;
 	int next_sid;
 	int total_traces;
+	int nsockets;
 	int nldom;
 	int ncpu;
 	int nlcpu;	
+	int thr_per_core;
+	int cores_per_socket;
+	int nodes_per_socket;
 	int ndevs;
 	int futex_cnt;
 	uint32 cache_insert_cnt;
@@ -2265,6 +2365,8 @@ typedef struct server_info {
 	char VM_guest;
 	char MSR_enabled;
 	float clk_mhz;
+	uint64 WinStartTime;
+	uint64 WinBootTime;
 
 	/* Kernel Side Channel Attacks (Spectre/Meltdown) fixes */
 	int scavuln;
@@ -2357,8 +2459,10 @@ extern clfutex_info_t **clfutex_hash;
 extern clipip_info_t **clipip_hash;
 extern clip_info_t **cllip_hash;
 extern clsdata_info_t **clsdata_hash;
+extern ntstatus_info_t **ntstatus_hash;
 extern int 	nservers;
 extern int	max_cstate;
+extern int	cstate_names;
 extern char	collapse_on;
 extern uint64   gbl_irq_time;
 extern int 	mapper_major;
@@ -2370,6 +2474,7 @@ extern server_info_t   *curr_int_serverp;
 extern runq_info_t ldrq[];
 extern runq_info_t     prev_int_ldrq[];        /* Two runq_info_t's to track delta stats */
 extern runq_info_t     curr_int_ldrq[];        /* for 100ms interval CPU summary.  See   */
+extern cstate_info_t	cstates[];
 
 extern sid_info_t sid_table[];
 extern uint64 dsk_io_sizes[];
@@ -2475,6 +2580,12 @@ extern char *win_thread_state[];
 extern char *win_thread_mode[];
 extern char *win_thread_wait_reason[];
 extern char *win_irq_flags[];
+extern char *uvm_ioctl[];
+extern char *nvidiactl_ioctl[];
+extern char *drm_ioctl[];
+extern char *dm_ioctl[];
+extern char *kvm_ioctl[];
+extern char *sg_ioctl[];
 
 extern void hex_dump(void *, int);
 extern int incr_trc_stats(void *, void *);
@@ -2511,3 +2622,4 @@ extern char util_str[];
 #define __NUM_vmsplice 278
 #define __NUM_write 1
 #define __NUM_writev 20
+#define __NUM_statfs 137
